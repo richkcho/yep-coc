@@ -38,7 +38,7 @@ impl<'a> YCQueue <'a> {
         let slot_count = data_region.len() / slot_size;
 
         if data_region.len() % slot_size != 0 {
-            return Err(YCQueueError::InvalidArgsError);
+            return Err(YCQueueError::InvalidArgs);
         }
 
         let mut slots = Vec::<Cell<Option<&'a mut [u8]>>>::with_capacity(slot_count);
@@ -47,7 +47,7 @@ impl<'a> YCQueue <'a> {
         }
             
         if shared_metadata.slot_count.load(Ordering::Acquire) as usize != slot_count {
-            return Err(YCQueueError::UnexpectedArgError);
+            return Err(YCQueueError::InvalidArgs);
         }
 
         Ok(YCQueue {
@@ -153,7 +153,7 @@ impl<'a> YCQueue <'a> {
         let slot_data = self.slots[produce_idx as usize].replace(None);
         match slot_data {
             Some(data) => return Ok(YCQueueProduceSlot {index: produce_idx, data}),
-            None => panic!("We double-loaned out index {:?}", produce_idx),
+            None => panic!("We double-loaned out produce index {:?}", produce_idx),
         }
     }
 
@@ -163,12 +163,15 @@ impl<'a> YCQueue <'a> {
          * to happen in the same order the slots were reserved. This updates the in-flight count.
          */
         
+        if queue_slot.data.len() != self.slot_size as usize {
+            return Some(YCQueueError::InvalidArgs);
+        }
+
         // yoink back the slot data
         let produce_idx = queue_slot.index;
         let old_data = self.slots[produce_idx as usize].replace(Some(queue_slot.data));
 
         assert!(old_data == None);
-        
         
         // update the bitfield. 
         let old_owner = self.set_owner(produce_idx, YCQueueOwner::Consumer);
@@ -224,11 +227,15 @@ impl<'a> YCQueue <'a> {
         let slot_data = self.slots[consume_idx as usize].replace(None);
         match slot_data {
             Some(data) => return Ok(YCQueueConsumeSlot {index: consume_idx, data}),
-            None => return Err(YCQueueError::InternalStateError),
+            None => panic!("We double-loaned out consume index {:?}", consume_idx),
         }
     }
 
     pub fn mark_slot_consumed(&mut self, queue_slot: YCQueueConsumeSlot<'a>) -> Option<YCQueueError> {
+        if queue_slot.data.len() != self.slot_size as usize {
+            return Some(YCQueueError::InvalidArgs);
+        }
+
         // yoink back the slot data
         let consume_idx = queue_slot.index;
         let old_data = self.slots[consume_idx as usize].replace(Some(queue_slot.data));

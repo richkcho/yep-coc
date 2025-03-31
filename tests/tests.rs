@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
     use yep_coc::{YCQueue, YCQueueError, YCQueueSharedMeta};
-    use yep_coc::queue_alloc_helpers::{YCQueueData, YCQueueOwnedMeta};
+    use yep_coc::queue_alloc_helpers::YCQueueData;
     
 
     pub fn str_to_u8(s: &str) -> &[u8] {
