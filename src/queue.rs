@@ -5,12 +5,13 @@ use crate::queue_meta::YCQueueU64Meta;
 use crate::utils::get_bit;
 use crate::{utils, YCQueueError, YCQueueSharedMeta};
 
-
+#[derive(Debug)]
 pub struct YCQueueProduceSlot<'a> {
     pub index: u16,
     pub data: &'a mut [u8],
 }
 
+#[derive(Debug)]
 pub struct YCQueueConsumeSlot<'a> {
     pub index: u16,
     pub data: &'a mut [u8],
@@ -123,7 +124,7 @@ impl<'a> YCQueue <'a> {
             let mut meta = YCQueueU64Meta::from_u64(value);
 
             // quick check for full queue
-            if meta.produce_idx == meta.consume_idx && meta.in_flight > 0 {
+            if meta.produce_idx == meta.consume_idx && (meta.in_flight > 0 || meta.produce_pending > 0) {
                 return Err(YCQueueError::OutOfSpace);
             }
 
@@ -135,6 +136,7 @@ impl<'a> YCQueue <'a> {
             let temp_produce_idx: u16 = meta.produce_idx;
 
             meta.produce_idx = (meta.produce_idx + 1) % self.slot_count;
+            meta.produce_pending += 1;
 
             // update shared memory with new produce_idx
             let new_value = meta.to_u64();
@@ -183,6 +185,9 @@ impl<'a> YCQueue <'a> {
             let mut meta = YCQueueU64Meta::from_u64(value);
 
             meta.in_flight += 1;
+
+            assert!(meta.produce_pending >= 1);
+            meta.produce_pending -= 1;
 
             assert!(meta.in_flight <= self.slot_count);
 

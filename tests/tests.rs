@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use yep_coc::{YCQueue, YCQueueError, YCQueueSharedMeta};
+    use yep_coc::{YCQueue, YCQueueError, YCQueueProduceSlot, YCQueueSharedMeta};
     use yep_coc::queue_alloc_helpers::YCQueueData;
     
 
@@ -39,16 +39,13 @@ mod tests {
         let shared_meta = YCQueueSharedMeta::new(&owned_data.meta);
 
         // set up the queue
-        let mut queue = match YCQueue::new(shared_meta, owned_data.data.as_mut_slice()) {
-            Ok(q) => q,
-            Err(e) => panic!("Failed to create queue: err {:?}", e),
-        };
+        let mut queue = YCQueue::new(shared_meta, owned_data.data.as_mut_slice()).unwrap();
+
+        // consume on empty queue should fail
+        assert_eq!(queue.get_consume_slot().unwrap_err(), YCQueueError::EmptyQueue);
 
         // get the first queue slot
-        let queue_slot_0 = match queue.get_produce_slot() {
-            Ok(s) => s,
-            Err(e) => panic!("Failed to get first queue slot, err {:?}", e),
-        };
+        let queue_slot_0 = queue.get_produce_slot().unwrap();
 
         // check queue fields
         assert_eq!(queue_slot_0.index, 0);
@@ -60,10 +57,7 @@ mod tests {
         copy_str_to_slice(first_test_msg, queue_slot_0.data);
 
         // get the second queue slot
-        let queue_slot_1 = match queue.get_produce_slot() {
-            Ok(s) => s,
-            Err(e) => panic!("Failed to get second queue slot, err {:?}", e),
-        };
+        let queue_slot_1 = queue.get_produce_slot().unwrap();
 
         // check queue fields
         assert_eq!(queue_slot_1.index, 1);
@@ -74,11 +68,8 @@ mod tests {
         let second_test_msg = "general kenobi";
         copy_str_to_slice(second_test_msg, queue_slot_1.data);
 
-        // attempt to consume from empty queue
-        match queue.get_consume_slot() {
-            Ok(_) => assert!(false),
-            Err(e) => assert_eq!(e, YCQueueError::EmptyQueue),
-        };
+        // attempt to consume from empty queue, which should fail
+        assert_eq!(queue.get_consume_slot().unwrap_err(), YCQueueError::EmptyQueue);
         assert_eq!(queue.consume_idx(), 0);
 
         // produce into the first queue slot
@@ -89,10 +80,7 @@ mod tests {
         // make sure consume idx didn't change somehow
         assert_eq!(queue.consume_idx(), 0);
 
-        let consume_slot_0 = match queue.get_consume_slot() {
-            Ok(slot) => slot,
-            Err(e) => panic!("Failed to get consume slot 0, err {:?}", e),
-        };
+        let consume_slot_0 = queue.get_consume_slot().unwrap();
 
         // check queue fields
         assert_eq!(consume_slot_0.index, 0);
@@ -103,11 +91,8 @@ mod tests {
         assert_eq!(consume_slot_0.data.len(), slot_size as usize);
         assert_eq!(str_from_u8(consume_slot_0.data), first_test_msg);
 
-        // attempt to consume from empty queue
-        match queue.get_consume_slot() {
-            Ok(_) => assert!(false),
-            Err(e) => assert_eq!(e, YCQueueError::EmptyQueue),
-        };
+        // attempt to consume from empty queue, which should fail
+        assert_eq!(queue.get_consume_slot().unwrap_err(), YCQueueError::EmptyQueue);
         assert_eq!(queue.consume_idx(), 1);
 
         // produce second data item
@@ -116,10 +101,7 @@ mod tests {
         assert_eq!(queue.in_flight_count(), 1);
         assert_eq!(queue.produce_idx(), 2);
 
-        let consume_slot_1 = match queue.get_consume_slot() {
-            Ok(slot) => slot,
-            Err(e) => panic!("Failed to get consume slot 1, err {:?}", e),
-        };
+        let consume_slot_1 = queue.get_consume_slot().unwrap();
 
         // check queue fields
         assert_eq!(consume_slot_1.index, 1);
@@ -138,6 +120,75 @@ mod tests {
         assert_eq!(queue.in_flight_count(), 0);
         assert_eq!(queue.produce_idx(), 2);
         assert_eq!(queue.consume_idx(), 2);
+
+    }
+
+    #[test]
+    fn capacity_tests() {
+        let slot_count: u16 = 8;
+        let slot_size: u16 = 256;
+
+        /*
+         * Set up the "shared metadata" for the queue
+         */
+        let mut owned_data = YCQueueData::new(slot_count, slot_size);
+        let shared_meta = YCQueueSharedMeta::new(&owned_data.meta);
+
+        // set up the queue
+        let mut queue = match YCQueue::new(shared_meta, owned_data.data.as_mut_slice()) {
+            Ok(q) => q,
+            Err(e) => panic!("Failed to create queue: err {:?}", e),
+        };
+
+        // reserve the entire queue for produce
+        let mut slots = Vec::<YCQueueProduceSlot>::new();
+
+        for _ in 0..slot_count {
+            slots.push(queue.get_produce_slot().unwrap());
+        }
+
+        assert_eq!(queue.in_flight_count(), 0);
+        assert_eq!(queue.produce_idx(), 0);
+        assert_eq!(queue.consume_idx(), 0);
+
+        // queue is entirely reserved, shouldn't be able to reserve another produce slot
+        assert_eq!(queue.get_produce_slot().unwrap_err(), YCQueueError::OutOfSpace);
+
+        // produce entire queue
+        for slot in slots.into_iter() {
+            queue.mark_slot_produced(slot);
+        }
+
+        // check queue stats
+        assert_eq!(queue.in_flight_count(), slot_count);
+        assert_eq!(queue.produce_idx(), 0);
+
+        // queue is still reserved, shouldn't be able to reserve another produce slot
+        assert_eq!(queue.get_produce_slot().unwrap_err(), YCQueueError::OutOfSpace);
+
+        // consume a SINGLE element
+        let consume_slot = queue.get_consume_slot().unwrap();
+        assert_eq!(consume_slot.index, 0);
+        assert_eq!(queue.consume_idx(), 1);
+
+        queue.mark_slot_consumed(consume_slot);
+        assert_eq!(queue.consume_idx(), 1);
+
+        // make sure we can produce exactly one more element
+        let produce_slot = queue.get_produce_slot().unwrap();
+        assert_eq!(produce_slot.index, 0);
+        assert_eq!(queue.produce_idx(), 1);
+        assert_eq!(queue.consume_idx(), 1);
+
+        assert_eq!(queue.get_produce_slot().unwrap_err(), YCQueueError::OutOfSpace);
+        
+        assert_eq!(queue.mark_slot_produced(produce_slot), None);
+
+        // consume the entire queue
+        for _ in 0..slot_count {
+            let consume_slot = queue.get_consume_slot().unwrap();
+            queue.mark_slot_consumed(consume_slot);
+        }
 
     }
 }
