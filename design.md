@@ -19,8 +19,6 @@ My expected users of this queue are users who want to implement high performance
 ## Yep Coc API
 YCQueue (yanother circular queue) strives to accomplish this via a reserve and submit model for producing / consuming slots in the queue. Producer(s) reserve slots to publish into, which can be asynchronously written into and submitted (marked as ready for consumption). Consumer(s) reserve slots to consume, which can be asynchronously processed, then marked ready for re-use. 
 
-```
-TODO code snippet.
-```
+See YCQueue in queue.rs for details. (TODO: add documentation with examples.)
 
 It will also have a disjoint metadata region, which can be kept separate from the data region. 

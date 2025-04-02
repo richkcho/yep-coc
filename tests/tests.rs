@@ -191,4 +191,38 @@ mod tests {
         }
 
     }
+
+    #[test]
+    fn out_of_order_produce_test() {
+        let slot_count: u16 = 8;
+        let slot_size: u16 = 256;
+
+        /*
+         * Set up the "shared metadata" for the queue
+         */
+        let mut owned_data = YCQueueData::new(slot_count, slot_size);
+        let shared_meta = YCQueueSharedMeta::new(&owned_data.meta);
+
+        // set up the queue
+        let mut queue = YCQueue::new(shared_meta, owned_data.data.as_mut_slice()).unwrap();
+
+        // get the queue slots
+        let queue_slot_0 = queue.get_produce_slot().unwrap();
+        let queue_slot_1 = queue.get_produce_slot().unwrap();
+
+        assert_eq!(queue_slot_0.index, 0);
+        assert_eq!(queue_slot_1.index, 1);
+
+        // produce "second" queue slot first
+        assert_eq!(queue.mark_slot_produced(queue_slot_1), None);
+
+        // consume should fail
+        assert_eq!(queue.get_consume_slot().unwrap_err(), YCQueueError::SlotNotReady);
+
+        // until we produce the first slsot
+        assert_eq!(queue.mark_slot_produced(queue_slot_0), None);
+
+        assert_eq!(queue.get_consume_slot().unwrap().index, 0);
+        assert_eq!(queue.get_consume_slot().unwrap().index, 1);
+    }
 }

@@ -4,4 +4,5 @@ pub enum YCQueueError {
     InvalidArgs,
     OutOfSpace,
     EmptyQueue,
+    SlotNotReady,
 }

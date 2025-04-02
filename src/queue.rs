@@ -214,6 +214,11 @@ impl<'a> YCQueue <'a> {
                 return Err(YCQueueError::EmptyQueue);
             }
 
+            // we may be stuck on a lagging slot, even though the queue is not empty
+            if self.get_owner(meta.consume_idx) != YCQueueOwner::Consumer {
+                return Err(YCQueueError::SlotNotReady);
+            }
+
             let temp_consume_idx: u16 = meta.consume_idx;
 
             meta.consume_idx = (meta.consume_idx + 1) % self.slot_count;
