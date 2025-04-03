@@ -225,4 +225,48 @@ mod tests {
         assert_eq!(queue.get_consume_slot().unwrap().index, 0);
         assert_eq!(queue.get_consume_slot().unwrap().index, 1);
     }
+
+    #[test]
+    fn out_of_order_consume_test() {
+        let slot_count: u16 = 8;
+        let slot_size: u16 = 256;
+
+        /*
+         * Set up the "shared metadata" for the queue
+         */
+        let mut owned_data = YCQueueData::new(slot_count, slot_size);
+        let shared_meta = YCQueueSharedMeta::new(&owned_data.meta);
+
+        // set up the queue
+        let mut queue = YCQueue::new(shared_meta, owned_data.data.as_mut_slice()).unwrap();
+
+        // produce entire queue
+        for _ in 0..slot_count {
+            let queue_slot = queue.get_produce_slot().unwrap();
+            assert_eq!(queue.mark_slot_produced(queue_slot), None);
+        }
+        assert_eq!(queue.produce_idx(), 0);
+        assert_eq!(queue.consume_idx(), 0);
+        assert_eq!(queue.in_flight_count(), slot_count);
+
+        // get two consume slots
+        let consume_slot_0 = queue.get_consume_slot().unwrap();
+        let consume_slot_1= queue.get_consume_slot().unwrap();
+
+        assert_eq!(consume_slot_0.index, 0);
+        assert_eq!(consume_slot_1.index, 1);
+
+        // mark second slot consumed
+        assert_eq!(queue.mark_slot_consumed(consume_slot_1), None);
+
+        // still can't get produce slot
+        assert_eq!(queue.get_produce_slot().unwrap_err(), YCQueueError::SlotNotReady);
+
+        // until we mark first slot consusmed
+        assert_eq!(queue.mark_slot_consumed(consume_slot_0), None);
+
+        // then both slots can be gotten again
+        assert_eq!(queue.get_produce_slot().unwrap().index, 0);
+        assert_eq!(queue.get_produce_slot().unwrap().index, 1);
+    }
 }

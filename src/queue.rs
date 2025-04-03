@@ -130,7 +130,7 @@ impl<'a> YCQueue <'a> {
 
             // if the consumer still owns the current produce idx, this means the queue is full as well
             if self.get_owner(meta.produce_idx) != YCQueueOwner::Producer {
-                return Err(YCQueueError::OutOfSpace);
+                return Err(YCQueueError::SlotNotReady);
             }
 
             let temp_produce_idx: u16 = meta.produce_idx;
