@@ -42,6 +42,11 @@ impl<'a> YCQueue <'a> {
             return Err(YCQueueError::InvalidArgs);
         }
 
+        // we need enough bits in the ownership bitmap
+        if shared_metadata.ownership.len() * (u64::BITS as usize) < slot_count {
+            return Err(YCQueueError::InvalidArgs);
+        } 
+
         let mut slots = Vec::<Cell<Option<&'a mut [u8]>>>::with_capacity(slot_count);
         for slot in data_region.chunks_exact_mut(slot_size).into_iter() {
             slots.push(Cell::new(Some(slot)));
@@ -257,6 +262,16 @@ impl<'a> YCQueue <'a> {
         assert_eq!(old_owner, YCQueueOwner::Consumer);
 
         None
+    }
+
+    /// Extends the capacity of the queue with the provided data region. The result of this call may not immediately result in a expanded queue, but will eventually expand the queue. 
+    pub fn expand(&mut self, data_region: &'a mut [u8]) -> Option<YCQueueError> {
+        /*
+         * 
+         */
+
+
+        return None;
     }
 
 }

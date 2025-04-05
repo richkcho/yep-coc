@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicU16, AtomicU64};
+use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU64};
 
 use crate::queue_alloc_helpers::YCQueueOwnedMeta;
 
@@ -11,9 +11,16 @@ pub struct YCQueueSharedMeta<'a> {
     pub(crate) u64_meta: &'a AtomicU64,
     /// bitmap representing who owns which slot in the queue. 0 -> producer, 1 -> consumer.
     pub(crate) ownership: &'a [AtomicU64],
-    // TODO: implement EXPAND
+}
+
+/// shared data required to support runtime size updates of the queue
+pub struct YCQueueUpdateMeta<'a> {
     // "busy bit" to implement locking for segment growth
-    // busy: &'a AtomicBool,
+    pub(crate) busy: &'a AtomicBool,
+    // how many active clients there are
+    pub(crate) clients: &'a AtomicU16,
+    // how many clients have ack'd the update
+    pub(crate) clients_ack: &'a AtomicU16,
 }
 
 impl<'a> YCQueueSharedMeta<'a> {
@@ -63,7 +70,7 @@ mod tests {
     use super::YCQueueU64Meta;
 
     #[test]
-    fn test_produce_meta() {
+    fn test_u64_meta() {
         let mut meta: YCQueueU64Meta = YCQueueU64Meta::from_u64(0);
 
         assert_eq!(meta.produce_idx, 0);

@@ -22,3 +22,5 @@ YCQueue (yanother circular queue) strives to accomplish this via a reserve and s
 See YCQueue in queue.rs for details. (TODO: add documentation with examples.)
 
 It will also have a disjoint metadata region, which can be kept separate from the data region. 
+
+There is also an API to dynamically add and reclaim segments of memory from a in-use circular queue. 

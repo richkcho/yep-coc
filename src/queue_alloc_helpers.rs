@@ -1,10 +1,11 @@
-use std::sync::atomic::{AtomicU16, AtomicU64};
+use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU64};
 
 pub struct YCQueueOwnedMeta {
     pub slot_count: AtomicU16,
     pub slot_size: AtomicU16,
     pub produce_meta: AtomicU64,
     pub ownership: Vec<AtomicU64>,
+    pub busy: AtomicBool,
 }
 
 impl YCQueueOwnedMeta {
@@ -13,12 +14,13 @@ impl YCQueueOwnedMeta {
         let slot_size = AtomicU16::new(slot_size_u16);
         let produce_meta = AtomicU64::new(0);
         let mut ownership = Vec::<AtomicU64>::with_capacity((slot_count_u16 as usize + u64::BITS as usize - 1) / u64::BITS as usize);
+        let busy = AtomicBool::new(false);
 
         for _i in 0..ownership.capacity() {
             ownership.push(AtomicU64::new(0));
         }
 
-        YCQueueOwnedMeta {slot_count, slot_size, produce_meta, ownership}
+        YCQueueOwnedMeta {slot_count, slot_size, produce_meta, ownership, busy}
     }
 }
 
