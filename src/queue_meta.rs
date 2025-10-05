@@ -2,6 +2,7 @@ use std::sync::atomic::{AtomicU16, AtomicU64};
 
 /// shared data associated with the metadata portion of the circular queue. All of these types are references, 
 /// as they should point to some shared memory region. 
+#[derive(Copy, Clone, Debug)]
 pub struct YCQueueSharedMeta<'a> {
     pub(crate) slot_count: &'a AtomicU16,
     pub(crate) slot_size: &'a AtomicU16,
@@ -10,6 +11,7 @@ pub struct YCQueueSharedMeta<'a> {
     pub(crate) ownership: &'a [AtomicU64],
 }
 
+#[derive(Copy, Clone, Debug)]
 pub(crate) struct YCQueueU64Meta {
     /// where to currently produce into
     pub(crate) produce_idx: u16,

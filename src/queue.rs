@@ -17,7 +17,7 @@ pub struct YCQueueConsumeSlot<'a> {
     pub data: &'a mut [u8],
 }
 
-#[derive(Eq, PartialEq, Debug)]
+#[derive(Clone, Copy, Eq, PartialEq, Debug)]
 pub enum YCQueueOwner {
     Producer,
     Consumer,

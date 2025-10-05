@@ -2,6 +2,7 @@ use std::sync::atomic::{AtomicU16, AtomicU64};
 
 use crate::{YCQueueError, YCQueueSharedMeta};
 
+#[derive(Debug)]
 pub struct YCQueueOwnedMeta {
     pub slot_count: AtomicU16,
     pub slot_size: AtomicU16,
@@ -53,6 +54,7 @@ impl<'a> YCQueueSharedMeta<'a> {
 }
 
 /// A way to hold a YCQueueSharedMeta to share between threads of a particular rust program. Not designed for IPC. 
+#[derive(Debug)]
 pub struct YCQueueOwnedData {
     pub meta: YCQueueOwnedMeta,
     pub data: Vec<u8>,
@@ -69,6 +71,7 @@ impl YCQueueOwnedData {
     }
 }
 
+#[derive(Debug)]
 pub struct YCQueueSharedData<'a> {
     pub meta: YCQueueSharedMeta<'a>,
     pub data: &'a mut [u8],
