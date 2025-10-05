@@ -8,9 +8,6 @@ pub struct YCQueueSharedMeta<'a> {
     pub(crate) u64_meta: &'a AtomicU64,
     /// bitmap representing who owns which slot in the queue. 0 -> producer, 1 -> consumer.
     pub(crate) ownership: &'a [AtomicU64],
-    // TODO: implement EXPAND
-    // "busy bit" to implement locking for segment growth
-    // busy: &'a AtomicBool,
 }
 
 pub(crate) struct YCQueueU64Meta {
