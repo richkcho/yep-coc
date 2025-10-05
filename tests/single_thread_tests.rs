@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
     use yep_coc::{YCQueue, YCQueueError, YCQueueProduceSlot, YCQueueSharedMeta};
-    use yep_coc::queue_alloc_helpers::YCQueueData;
+    use yep_coc::queue_alloc_helpers::YCQueueOwnedData;
     
 
     pub fn str_to_u8(s: &str) -> &[u8] {
@@ -35,7 +35,7 @@ mod tests {
         /*
          * Set up the "shared metadata" for the queue
          */
-        let mut owned_data = YCQueueData::new(slot_count, slot_size);
+        let mut owned_data = YCQueueOwnedData::new(slot_count, slot_size);
         let shared_meta = YCQueueSharedMeta::new(&owned_data.meta);
 
         // set up the queue
@@ -73,7 +73,7 @@ mod tests {
         assert_eq!(queue.consume_idx(), 0);
 
         // produce into the first queue slot
-        queue.mark_slot_produced(queue_slot_0);
+        queue.mark_slot_produced(queue_slot_0).unwrap();
         assert_eq!(queue.in_flight_count(), 1);
         assert_eq!(queue.produce_idx(), 2);
         
@@ -97,7 +97,7 @@ mod tests {
 
         // produce second data item
         // produce into the first queue slot
-        queue.mark_slot_produced(queue_slot_1);
+        queue.mark_slot_produced(queue_slot_1).unwrap();
         assert_eq!(queue.in_flight_count(), 1);
         assert_eq!(queue.produce_idx(), 2);
 
@@ -113,8 +113,8 @@ mod tests {
         assert_eq!(str_from_u8(consume_slot_1.data), second_test_msg);
 
         // mark slots as consumed
-        queue.mark_slot_consumed(consume_slot_0);
-        queue.mark_slot_consumed(consume_slot_1);
+        queue.mark_slot_consumed(consume_slot_0).unwrap();
+        queue.mark_slot_consumed(consume_slot_1).unwrap();
 
         // check fields
         assert_eq!(queue.in_flight_count(), 0);
@@ -131,7 +131,7 @@ mod tests {
         /*
          * Set up the "shared metadata" for the queue
          */
-        let mut owned_data = YCQueueData::new(slot_count, slot_size);
+        let mut owned_data = YCQueueOwnedData::new(slot_count, slot_size);
         let shared_meta = YCQueueSharedMeta::new(&owned_data.meta);
 
         // set up the queue
@@ -156,7 +156,7 @@ mod tests {
 
         // produce entire queue
         for slot in slots.into_iter() {
-            queue.mark_slot_produced(slot);
+            queue.mark_slot_produced(slot).unwrap();
         }
 
         // check queue stats
@@ -171,7 +171,7 @@ mod tests {
         assert_eq!(consume_slot.index, 0);
         assert_eq!(queue.consume_idx(), 1);
 
-        queue.mark_slot_consumed(consume_slot);
+        queue.mark_slot_consumed(consume_slot).unwrap();
         assert_eq!(queue.consume_idx(), 1);
 
         // make sure we can produce exactly one more element
@@ -181,13 +181,13 @@ mod tests {
         assert_eq!(queue.consume_idx(), 1);
 
         assert_eq!(queue.get_produce_slot().unwrap_err(), YCQueueError::OutOfSpace);
-        
-        assert_eq!(queue.mark_slot_produced(produce_slot), None);
+
+        queue.mark_slot_produced(produce_slot).unwrap();
 
         // consume the entire queue
         for _ in 0..slot_count {
             let consume_slot = queue.get_consume_slot().unwrap();
-            queue.mark_slot_consumed(consume_slot);
+            queue.mark_slot_consumed(consume_slot).unwrap();
         }
 
     }
@@ -200,7 +200,7 @@ mod tests {
         /*
          * Set up the "shared metadata" for the queue
          */
-        let mut owned_data = YCQueueData::new(slot_count, slot_size);
+        let mut owned_data = YCQueueOwnedData::new(slot_count, slot_size);
         let shared_meta = YCQueueSharedMeta::new(&owned_data.meta);
 
         // set up the queue
@@ -214,13 +214,13 @@ mod tests {
         assert_eq!(queue_slot_1.index, 1);
 
         // produce "second" queue slot first
-        assert_eq!(queue.mark_slot_produced(queue_slot_1), None);
+        queue.mark_slot_produced(queue_slot_1).unwrap();
 
         // consume should fail
         assert_eq!(queue.get_consume_slot().unwrap_err(), YCQueueError::SlotNotReady);
 
         // until we produce the first slsot
-        assert_eq!(queue.mark_slot_produced(queue_slot_0), None);
+        queue.mark_slot_produced(queue_slot_0).unwrap();
 
         assert_eq!(queue.get_consume_slot().unwrap().index, 0);
         assert_eq!(queue.get_consume_slot().unwrap().index, 1);
@@ -234,7 +234,7 @@ mod tests {
         /*
          * Set up the "shared metadata" for the queue
          */
-        let mut owned_data = YCQueueData::new(slot_count, slot_size);
+        let mut owned_data = YCQueueOwnedData::new(slot_count, slot_size);
         let shared_meta = YCQueueSharedMeta::new(&owned_data.meta);
 
         // set up the queue
@@ -243,7 +243,7 @@ mod tests {
         // produce entire queue
         for _ in 0..slot_count {
             let queue_slot = queue.get_produce_slot().unwrap();
-            assert_eq!(queue.mark_slot_produced(queue_slot), None);
+            queue.mark_slot_produced(queue_slot).unwrap();
         }
         assert_eq!(queue.produce_idx(), 0);
         assert_eq!(queue.consume_idx(), 0);
@@ -257,13 +257,13 @@ mod tests {
         assert_eq!(consume_slot_1.index, 1);
 
         // mark second slot consumed
-        assert_eq!(queue.mark_slot_consumed(consume_slot_1), None);
+        queue.mark_slot_consumed(consume_slot_1).unwrap();
 
         // still can't get produce slot
         assert_eq!(queue.get_produce_slot().unwrap_err(), YCQueueError::SlotNotReady);
 
         // until we mark first slot consusmed
-        assert_eq!(queue.mark_slot_consumed(consume_slot_0), None);
+        queue.mark_slot_consumed(consume_slot_0).unwrap();
 
         // then both slots can be gotten again
         assert_eq!(queue.get_produce_slot().unwrap().index, 0);
@@ -277,7 +277,7 @@ mod tests {
         const ITERATIONS: usize = 4; // Number of times to loop around the queue
 
         // Set up the queue
-        let mut owned_data = YCQueueData::new(slot_count, slot_size);
+        let mut owned_data = YCQueueOwnedData::new(slot_count, slot_size);
         let shared_meta = YCQueueSharedMeta::new(&owned_data.meta);
         let mut queue = YCQueue::new(shared_meta, owned_data.data.as_mut_slice()).unwrap();
 
@@ -298,7 +298,7 @@ mod tests {
             // Mark all slots in this batch as produced
             for _ in 0..slot_count {
                 let slot = produce_slots.remove(0);
-                queue.mark_slot_produced(slot);
+                queue.mark_slot_produced(slot).unwrap();
             }
 
             // Consume all messages in this batch
@@ -307,7 +307,7 @@ mod tests {
                 let slot = queue.get_consume_slot().unwrap();
                 let msg = str_from_u8(slot.data).to_string();
                 consumed_messages.push(msg);
-                queue.mark_slot_consumed(slot);
+                queue.mark_slot_consumed(slot).unwrap();
             }
 
             // Sort both lists since order doesn't matter within a batch

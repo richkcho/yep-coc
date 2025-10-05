@@ -159,14 +159,14 @@ impl<'a> YCQueue <'a> {
         }
     }
 
-    pub fn mark_slot_produced(&mut self, queue_slot: YCQueueProduceSlot<'a>) -> Option<YCQueueError> {
+    pub fn mark_slot_produced(&mut self, queue_slot: YCQueueProduceSlot<'a>) -> Result<(), YCQueueError> {
         /*
          * Marking a slot as produced gives it to the consumer to consume. These are not required 
          * to happen in the same order the slots were reserved. This updates the in-flight count.
          */
         
         if queue_slot.data.len() != self.slot_size as usize {
-            return Some(YCQueueError::InvalidArgs);
+            return Err(YCQueueError::InvalidArgs);
         }
 
         // yoink back the slot data
@@ -200,7 +200,7 @@ impl<'a> YCQueue <'a> {
             break;
         }
 
-        None
+        Ok(())
     }
 
     pub fn get_consume_slot(&mut self) -> Result<YCQueueConsumeSlot<'a>, YCQueueError> {
@@ -241,9 +241,9 @@ impl<'a> YCQueue <'a> {
         }
     }
 
-    pub fn mark_slot_consumed(&mut self, queue_slot: YCQueueConsumeSlot<'a>) -> Option<YCQueueError> {
+    pub fn mark_slot_consumed(&mut self, queue_slot: YCQueueConsumeSlot<'a>) -> Result<(), YCQueueError> {
         if queue_slot.data.len() != self.slot_size as usize {
-            return Some(YCQueueError::InvalidArgs);
+            return Err(YCQueueError::InvalidArgs);
         }
 
         // yoink back the slot data
@@ -256,7 +256,7 @@ impl<'a> YCQueue <'a> {
         let old_owner = self.set_owner(consume_idx, YCQueueOwner::Producer);
         assert_eq!(old_owner, YCQueueOwner::Consumer);
 
-        None
+        Ok(())
     }
 
 }

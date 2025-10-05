@@ -1,8 +1,5 @@
 use std::sync::atomic::{AtomicU16, AtomicU64};
 
-use crate::queue_alloc_helpers::YCQueueOwnedMeta;
-
-
 /// shared data associated with the metadata portion of the circular queue. All of these types are references, 
 /// as they should point to some shared memory region. 
 pub struct YCQueueSharedMeta<'a> {
@@ -14,12 +11,6 @@ pub struct YCQueueSharedMeta<'a> {
     // TODO: implement EXPAND
     // "busy bit" to implement locking for segment growth
     // busy: &'a AtomicBool,
-}
-
-impl<'a> YCQueueSharedMeta<'a> {
-    pub fn new(meta_ref: &YCQueueOwnedMeta) -> YCQueueSharedMeta {
-        YCQueueSharedMeta {slot_count: &meta_ref.slot_count, slot_size: &meta_ref.slot_size, u64_meta: &meta_ref.produce_meta, ownership: &meta_ref.ownership}
-    }
 }
 
 pub(crate) struct YCQueueU64Meta {
