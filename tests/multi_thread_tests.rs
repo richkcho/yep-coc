@@ -27,6 +27,7 @@ mod tests {
         assert!(s_bytes.len() <= buf.len(), "dst buffer not large enough!");
 
         buf[..s_bytes.len()].copy_from_slice(s_bytes);
+        buf[s_bytes.len()..].fill(0);
     }
 
     #[test]
@@ -152,11 +153,16 @@ mod tests {
                         match consume_queue.get_consume_slot() {
                             Ok(consume_slot) => {
                                 let message = str_from_u8(consume_slot.data);
-                                let id_str = message.strip_prefix("hello-").unwrap();
-                                let id: u32 = id_str.parse().unwrap();
+                                let id_str = message.strip_prefix("hello-").expect(format!("bad message: {}", message).as_str());
+                                let id: u32 = id_str.parse().expect(format!("bad message: {}", message).as_str());
                                 assert!(id < max_messages, "received id out of range: {}, message: {}, slot: {}", id, message, consume_slot.index);
                                 // we should only ever insert unique values
                                 assert!(received_ids.lock().unwrap().insert(id), "duplicate message received: {}", message);
+
+                                // poison the block after consuming the message to help catch bugs
+                                let poison_str = format!("poisoned-{}", consume_slot.index);
+                                copy_str_to_slice(&poison_str, consume_slot.data);
+
                                 consume_queue.mark_slot_consumed(consume_slot).unwrap();
                             }
                             Err(YCQueueError::EmptyQueue) | Err(YCQueueError::SlotNotReady) => {

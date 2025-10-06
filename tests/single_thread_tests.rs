@@ -21,6 +21,7 @@ mod tests {
         assert!(s_bytes.len() <= buf.len(), "dst buffer not large enough!");
 
         buf[..s_bytes.len()].copy_from_slice(s_bytes);
+        buf[s_bytes.len()..].fill(0);
     }
 
     #[test]
