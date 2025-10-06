@@ -7,14 +7,23 @@ on:
     paths:
       - src/**
       - tests/**
+  pull_request_review:
+    types: [submitted] # only run on approved PRs, so when it is submitted
+    paths:
+      - src/**
+      - tests/**
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
   build-and-test:
-
-    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request_review' && github.event.review.state == 'approved')
+    
+    strategy:
+      matrix:
+        os: [ubuntu-latest, ubuntu-22.04-arm]
+    runs-on: ${{ matrix.os }}
 
     steps:
     - uses: actions/checkout@v4
