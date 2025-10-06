@@ -110,9 +110,10 @@ mod tests {
     fn multi_produce_consume_test() {
         let slot_count: u16 = 64;
         let slot_size: u16 = 64;
-        let num_iterations: u16 = 20;
+        let num_iterations: u16 = 100;
         let num_producers: u16 = 4;
         let num_consumers: u16 = 4;
+        let timeout = std::time::Duration::from_secs(10);
 
         // this is the "original" data - it owned the underlying allocations
         let owned_data = YCQueueOwnedData::new(slot_count, slot_size);
@@ -135,22 +136,27 @@ mod tests {
         let produce_counter = Arc::new(AtomicU32::new(0));
         let max_messages = (slot_count as u32) * (num_iterations as u32);
 
-        // keep track of recieved message
-        let recieved_messages = Arc::new(Mutex::new(HashSet::<String>::new()));
-        let sent_messages = Arc::new(Mutex::new(HashSet::<String>::new()));
+        // keep track of received message
+        let received_ids = Arc::new(Mutex::new(HashSet::<u32>::new()));
+        let sent_ids = Arc::new(Mutex::new(HashSet::<u32>::new()));
 
+        let deadline = std::time::Instant::now() + timeout;
         std::thread::scope(|s| {
             // start consumers
-            for _ in 0..num_consumers {
+            for i in 0..num_consumers {
+                let builder = std::thread::Builder::new().name(format!("consumer_{}", i));
                 let mut consume_queue = consumer_queues.pop().unwrap();
-                let recieved_messages = Arc::clone(&recieved_messages);
-                s.spawn(move || {
-                    while recieved_messages.lock().unwrap().len() < max_messages as usize{
+                let received_ids = Arc::clone(&received_ids);
+                builder.spawn_scoped(s, move || {
+                    while received_ids.lock().unwrap().len() < max_messages as usize{
                         match consume_queue.get_consume_slot() {
                             Ok(consume_slot) => {
                                 let message = str_from_u8(consume_slot.data);
+                                let id_str = message.strip_prefix("hello-").unwrap();
+                                let id: u32 = id_str.parse().unwrap();
+                                assert!(id < max_messages, "received id out of range: {}, message: {}, slot: {}", id, message, consume_slot.index);
                                 // we should only ever insert unique values
-                                assert!(recieved_messages.lock().unwrap().insert(message.to_string()), "duplicate message received: {}", message);
+                                assert!(received_ids.lock().unwrap().insert(id), "duplicate message received: {}", message);
                                 consume_queue.mark_slot_consumed(consume_slot).unwrap();
                             }
                             Err(YCQueueError::EmptyQueue) | Err(YCQueueError::SlotNotReady) => {
@@ -161,25 +167,31 @@ mod tests {
                                 panic!("unexpected error when consuming: {:?}", e);
                             }
                         }
+
+                        if std::time::Instant::now() > deadline {
+                            panic!("test timed out after {:?}", timeout);
+                        }
                     }
-                });
+                }).unwrap();
             }
 
             // start producers
-            for _ in 0..num_producers {
-                let sent_messages = Arc::clone(&sent_messages);
+            for i in 0..num_producers {
+                let builder = std::thread::Builder::new().name(format!("producer_{}", i));
+                let sent_ids = Arc::clone(&sent_ids);
                 let mut produce_queue = producer_queues.pop().unwrap();
                 let counter = Arc::clone(&produce_counter);
-                s.spawn(move || {
+                builder.spawn_scoped(s, move || {
                     let mut id = counter.fetch_add(1, Ordering::AcqRel);
                     while id < max_messages {
                         match produce_queue.get_produce_slot() {
                             Ok(mut produce_slot) => {
                                 let produce_str = format!("hello-{}", id);
                                 copy_str_to_slice(&produce_str, &mut produce_slot.data);
+                                print!("{}:{}\n", produce_slot.index, produce_str);
                                 produce_queue.mark_slot_produced(produce_slot).unwrap();
 
-                                assert!(sent_messages.lock().unwrap().insert(produce_str.to_string()), "duplicate message sent: {}", produce_str);
+                                assert!(sent_ids.lock().unwrap().insert(id), "duplicate message sent: {}", produce_str);
                                 id = counter.fetch_add(1, Ordering::AcqRel);
                             }
                             Err(YCQueueError::OutOfSpace) | Err(YCQueueError::SlotNotReady) => {
@@ -190,8 +202,12 @@ mod tests {
                                 panic!("unexpected error when producing: {:?}", e);
                             }
                         }
+
+                        if std::time::Instant::now() > deadline {
+                            panic!("test timed out after {:?}", timeout);
+                        }
                     }
-                });
+                }).unwrap();
             }
         });
 
@@ -199,21 +215,19 @@ mod tests {
         assert!(produce_counter.load(Ordering::Acquire) >= max_messages);
 
         // the sent messages map should have the exact same size
-        assert_eq!(sent_messages.lock().unwrap().len(), max_messages as usize);
+        assert_eq!(sent_ids.lock().unwrap().len(), max_messages as usize);
 
         // make sure we sent all the messages
         for i in 0..max_messages {
-            let expected_str = format!("hello-{}", i);
-            assert!(sent_messages.lock().unwrap().contains(&expected_str), "missing message: {}", expected_str);
+            assert!(sent_ids.lock().unwrap().contains(&i), "missing sent id: {}", i);
         }
 
         // make sure we got all the messages
-        let recieved_messages = recieved_messages.lock().unwrap();
-        assert_eq!(recieved_messages.len(), max_messages as usize);
+        let received_ids = received_ids.lock().unwrap();
+        assert_eq!(received_ids.len(), max_messages as usize);
 
         for i in 0..max_messages {
-            let expected_str = format!("hello-{}", i);
-            assert!(recieved_messages.contains(&expected_str), "missing message: {}", expected_str);
+            assert!(received_ids.contains(&i), "missing received id: {}, ids: {:?}", i, received_ids);
         }
     }
 }
