@@ -149,7 +149,7 @@ impl<'a> YCQueue <'a> {
             break;
         }
 
-        debug_assert!(self.get_owner(produce_idx) == YCQueueOwner::Producer);
+        debug_assert_eq!(self.get_owner(produce_idx), YCQueueOwner::Producer);
 
         // hand out the slice that corresponds to this slot
         let slot_data = self.slots[produce_idx as usize].replace(None);
@@ -173,11 +173,11 @@ impl<'a> YCQueue <'a> {
         let produce_idx = queue_slot.index;
         let old_data = self.slots[produce_idx as usize].replace(Some(queue_slot.data));
 
-        assert!(old_data == None);
+        debug_assert_eq!(old_data, None);
         
         // update the bitfield. 
         let old_owner = self.set_owner(produce_idx, YCQueueOwner::Consumer);
-        assert_eq!(old_owner, YCQueueOwner::Producer);
+        debug_assert_eq!(old_owner, YCQueueOwner::Producer);
 
         // update the in-flight count
         loop {
@@ -189,7 +189,7 @@ impl<'a> YCQueue <'a> {
             assert!(meta.produce_pending >= 1);
             meta.produce_pending -= 1;
 
-            assert!(meta.in_flight <= self.slot_count);
+            debug_assert!(meta.in_flight <= self.slot_count);
 
             let new_value = meta.to_u64();
             match self.shared_metadata.u64_meta.compare_exchange(value, new_value, Ordering::AcqRel, Ordering::Acquire) {
@@ -250,11 +250,11 @@ impl<'a> YCQueue <'a> {
         let consume_idx = queue_slot.index;
         let old_data = self.slots[consume_idx as usize].replace(Some(queue_slot.data));
 
-        assert!(old_data == None);
+        debug_assert_eq!(old_data, None);
 
         // update the bitfield now
         let old_owner = self.set_owner(consume_idx, YCQueueOwner::Producer);
-        assert_eq!(old_owner, YCQueueOwner::Consumer);
+        debug_assert_eq!(old_owner, YCQueueOwner::Consumer);
 
         Ok(())
     }
