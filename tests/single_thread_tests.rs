@@ -1,12 +1,10 @@
-mod utils;
-
 #[cfg(test)]
 mod tests {
     use yep_coc::{YCQueue, YCQueueError, YCQueueProduceSlot, YCQueueSharedMeta};
     use yep_coc::queue_alloc_helpers::YCQueueOwnedData;
-    
-    use crate::utils::{copy_str_to_slice, str_from_u8};
 
+    use test_support::utils::{copy_str_to_slice, str_from_u8};
+    
     #[test]
     /**
      * Simple test that produces and consumes two items from the queue with the pattern 

@@ -1,5 +1,3 @@
-mod utils;
-
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
@@ -9,7 +7,7 @@ mod tests {
     use yep_coc::queue_alloc_helpers::{YCQueueOwnedData, YCQueueSharedData};
     use yep_coc::{YCQueue, YCQueueError};
 
-    use crate::utils::{copy_str_to_slice, str_from_u8};
+    use test_support::utils::{copy_str_to_slice, str_from_u8};
 
     #[test]
     /**

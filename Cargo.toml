@@ -1,8 +1,10 @@
 [package]
 name = "yep_coc"
 version = "0.1.0"
-edition = "2018"
+edition = "2024"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[workspace]
+members = ["test_support"]
 
-[dependencies]
+[dev-dependencies]
+test_support = {path = "test_support"}
