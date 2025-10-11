@@ -1,12 +1,12 @@
 pub(crate) fn set_bit(value: &u64, index: u8) -> u64 {
     assert!(index < u64::BITS as u8, "index too large");
     return value | (1 << index);
-} 
+}
 
 pub(crate) fn clear_bit(value: &u64, index: u8) -> u64 {
     assert!(index < u64::BITS as u8, "index too large");
     return value & (!(1 << index));
-} 
+}
 
 pub(crate) fn get_bit(value: &u64, index: u8) -> bool {
     assert!(index < u64::BITS as u8, "index too large");

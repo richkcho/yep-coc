@@ -1,14 +1,14 @@
 #[cfg(test)]
 mod tests {
-    use yep_coc::{YCQueue, YCQueueError, YCQueueProduceSlot, YCQueueSharedMeta};
     use yep_coc::queue_alloc_helpers::YCQueueOwnedData;
+    use yep_coc::{YCQueue, YCQueueError, YCQueueProduceSlot, YCQueueSharedMeta};
 
     use test_support::utils::{copy_str_to_slice, str_from_u8};
-    
+
     #[test]
     /**
-     * Simple test that produces and consumes two items from the queue with the pattern 
-     * produce -> consume -> produce -> consume, checking queue state and data contents along the way. 
+     * Simple test that produces and consumes two items from the queue with the pattern
+     * produce -> consume -> produce -> consume, checking queue state and data contents along the way.
      */
     fn simple_produce_consume_test() {
         let slot_count: u16 = 8;
@@ -24,7 +24,10 @@ mod tests {
         let mut queue = YCQueue::new(shared_meta, owned_data.data.as_mut_slice()).unwrap();
 
         // consume on empty queue should fail
-        assert_eq!(queue.get_consume_slot().unwrap_err(), YCQueueError::EmptyQueue);
+        assert_eq!(
+            queue.get_consume_slot().unwrap_err(),
+            YCQueueError::EmptyQueue
+        );
 
         // get the first queue slot
         let queue_slot_0 = queue.get_produce_slot().unwrap();
@@ -51,14 +54,17 @@ mod tests {
         copy_str_to_slice(second_test_msg, queue_slot_1.data);
 
         // attempt to consume from empty queue, which should fail
-        assert_eq!(queue.get_consume_slot().unwrap_err(), YCQueueError::EmptyQueue);
+        assert_eq!(
+            queue.get_consume_slot().unwrap_err(),
+            YCQueueError::EmptyQueue
+        );
         assert_eq!(queue.consume_idx(), 0);
 
         // produce into the first queue slot
         queue.mark_slot_produced(queue_slot_0).unwrap();
         assert_eq!(queue.in_flight_count(), 1);
         assert_eq!(queue.produce_idx(), 2);
-        
+
         // make sure consume idx didn't change somehow
         assert_eq!(queue.consume_idx(), 0);
 
@@ -74,7 +80,10 @@ mod tests {
         assert_eq!(str_from_u8(consume_slot_0.data), first_test_msg);
 
         // attempt to consume from empty queue, which should fail
-        assert_eq!(queue.get_consume_slot().unwrap_err(), YCQueueError::EmptyQueue);
+        assert_eq!(
+            queue.get_consume_slot().unwrap_err(),
+            YCQueueError::EmptyQueue
+        );
         assert_eq!(queue.consume_idx(), 1);
 
         // produce second data item
@@ -102,7 +111,6 @@ mod tests {
         assert_eq!(queue.in_flight_count(), 0);
         assert_eq!(queue.produce_idx(), 2);
         assert_eq!(queue.consume_idx(), 2);
-
     }
 
     #[test]
@@ -134,7 +142,10 @@ mod tests {
         assert_eq!(queue.consume_idx(), 0);
 
         // queue is entirely reserved, shouldn't be able to reserve another produce slot
-        assert_eq!(queue.get_produce_slot().unwrap_err(), YCQueueError::OutOfSpace);
+        assert_eq!(
+            queue.get_produce_slot().unwrap_err(),
+            YCQueueError::OutOfSpace
+        );
 
         // produce entire queue
         for slot in slots.into_iter() {
@@ -146,7 +157,10 @@ mod tests {
         assert_eq!(queue.produce_idx(), 0);
 
         // queue is still reserved, shouldn't be able to reserve another produce slot
-        assert_eq!(queue.get_produce_slot().unwrap_err(), YCQueueError::OutOfSpace);
+        assert_eq!(
+            queue.get_produce_slot().unwrap_err(),
+            YCQueueError::OutOfSpace
+        );
 
         // consume a SINGLE element
         let consume_slot = queue.get_consume_slot().unwrap();
@@ -162,7 +176,10 @@ mod tests {
         assert_eq!(queue.produce_idx(), 1);
         assert_eq!(queue.consume_idx(), 1);
 
-        assert_eq!(queue.get_produce_slot().unwrap_err(), YCQueueError::OutOfSpace);
+        assert_eq!(
+            queue.get_produce_slot().unwrap_err(),
+            YCQueueError::OutOfSpace
+        );
 
         queue.mark_slot_produced(produce_slot).unwrap();
 
@@ -171,7 +188,6 @@ mod tests {
             let consume_slot = queue.get_consume_slot().unwrap();
             queue.mark_slot_consumed(consume_slot).unwrap();
         }
-
     }
 
     #[test]
@@ -199,7 +215,10 @@ mod tests {
         queue.mark_slot_produced(queue_slot_1).unwrap();
 
         // consume should fail
-        assert_eq!(queue.get_consume_slot().unwrap_err(), YCQueueError::SlotNotReady);
+        assert_eq!(
+            queue.get_consume_slot().unwrap_err(),
+            YCQueueError::SlotNotReady
+        );
 
         // until we produce the first slsot
         queue.mark_slot_produced(queue_slot_0).unwrap();
@@ -233,7 +252,7 @@ mod tests {
 
         // get two consume slots
         let consume_slot_0 = queue.get_consume_slot().unwrap();
-        let consume_slot_1= queue.get_consume_slot().unwrap();
+        let consume_slot_1 = queue.get_consume_slot().unwrap();
 
         assert_eq!(consume_slot_0.index, 0);
         assert_eq!(consume_slot_1.index, 1);
@@ -242,7 +261,10 @@ mod tests {
         queue.mark_slot_consumed(consume_slot_1).unwrap();
 
         // still can't get produce slot
-        assert_eq!(queue.get_produce_slot().unwrap_err(), YCQueueError::SlotNotReady);
+        assert_eq!(
+            queue.get_produce_slot().unwrap_err(),
+            YCQueueError::SlotNotReady
+        );
 
         // until we mark first slot consusmed
         queue.mark_slot_consumed(consume_slot_0).unwrap();
@@ -293,14 +315,22 @@ mod tests {
             }
 
             // Sort both lists since order doesn't matter within a batch
-            let mut expected: Vec<_> = all_messages[iter*slot_count as usize..(iter+1)*slot_count as usize].to_vec();
+            let mut expected: Vec<_> =
+                all_messages[iter * slot_count as usize..(iter + 1) * slot_count as usize].to_vec();
             expected.sort();
             consumed_messages.sort();
-            assert_eq!(consumed_messages, expected, "Messages in iteration {} don't match", iter);
+            assert_eq!(
+                consumed_messages, expected,
+                "Messages in iteration {} don't match",
+                iter
+            );
         }
 
         // Verify queue is empty
-        assert_eq!(queue.get_consume_slot().unwrap_err(), YCQueueError::EmptyQueue);
+        assert_eq!(
+            queue.get_consume_slot().unwrap_err(),
+            YCQueueError::EmptyQueue
+        );
         assert_eq!(queue.in_flight_count(), 0);
         assert_eq!(queue.produce_idx(), queue.consume_idx());
     }

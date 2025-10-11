@@ -1,9 +1,9 @@
 /// the circular queue code
 pub mod queue;
 pub use queue::YCQueue;
-pub use queue::YCQueueProduceSlot;
 pub use queue::YCQueueConsumeSlot;
 pub use queue::YCQueueOwner;
+pub use queue::YCQueueProduceSlot;
 
 /// dependencies for the circular queue code
 pub mod queue_meta;

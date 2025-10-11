@@ -127,37 +127,53 @@ mod tests {
                 let builder = std::thread::Builder::new().name(format!("consumer_{}", i));
                 let mut consume_queue = consumer_queues.pop().unwrap();
                 let received_ids = Arc::clone(&received_ids);
-                builder.spawn_scoped(s, move || {
-                    while received_ids.lock().unwrap().len() < max_messages as usize{
-                        match consume_queue.get_consume_slot() {
-                            Ok(consume_slot) => {
-                                let message = str_from_u8(consume_slot.data);
-                                let id_str = message.strip_prefix("hello-").expect(format!("bad message: {}", message).as_str());
-                                let id: u32 = id_str.parse().expect(format!("bad message: {}", message).as_str());
-                                assert!(id < max_messages, "received id out of range: {}, message: {}, slot: {}", id, message, consume_slot.index);
-                                // we should only ever insert unique values
-                                assert!(received_ids.lock().unwrap().insert(id), "duplicate message received: {}", message);
+                builder
+                    .spawn_scoped(s, move || {
+                        while received_ids.lock().unwrap().len() < max_messages as usize {
+                            match consume_queue.get_consume_slot() {
+                                Ok(consume_slot) => {
+                                    let message = str_from_u8(consume_slot.data);
+                                    let id_str = message
+                                        .strip_prefix("hello-")
+                                        .expect(format!("bad message: {}", message).as_str());
+                                    let id: u32 = id_str
+                                        .parse()
+                                        .expect(format!("bad message: {}", message).as_str());
+                                    assert!(
+                                        id < max_messages,
+                                        "received id out of range: {}, message: {}, slot: {}",
+                                        id,
+                                        message,
+                                        consume_slot.index
+                                    );
+                                    // we should only ever insert unique values
+                                    assert!(
+                                        received_ids.lock().unwrap().insert(id),
+                                        "duplicate message received: {}",
+                                        message
+                                    );
 
-                                // poison the block after consuming the message to help catch bugs
-                                let poison_str = format!("poisoned-{}", consume_slot.index);
-                                copy_str_to_slice(&poison_str, consume_slot.data);
+                                    // poison the block after consuming the message to help catch bugs
+                                    let poison_str = format!("poisoned-{}", consume_slot.index);
+                                    copy_str_to_slice(&poison_str, consume_slot.data);
 
-                                consume_queue.mark_slot_consumed(consume_slot).unwrap();
+                                    consume_queue.mark_slot_consumed(consume_slot).unwrap();
+                                }
+                                Err(YCQueueError::EmptyQueue) | Err(YCQueueError::SlotNotReady) => {
+                                    // no data yet, just spin
+                                    std::thread::yield_now();
+                                }
+                                Err(e) => {
+                                    panic!("unexpected error when consuming: {:?}", e);
+                                }
                             }
-                            Err(YCQueueError::EmptyQueue) | Err(YCQueueError::SlotNotReady) => {
-                                // no data yet, just spin
-                                std::thread::yield_now();
-                            }
-                            Err(e) => {
-                                panic!("unexpected error when consuming: {:?}", e);
+
+                            if std::time::Instant::now() > deadline {
+                                panic!("test timed out after {:?}", timeout);
                             }
                         }
-
-                        if std::time::Instant::now() > deadline {
-                            panic!("test timed out after {:?}", timeout);
-                        }
-                    }
-                }).unwrap();
+                    })
+                    .unwrap();
             }
 
             // start producers
@@ -166,33 +182,39 @@ mod tests {
                 let sent_ids = Arc::clone(&sent_ids);
                 let mut produce_queue = producer_queues.pop().unwrap();
                 let counter = Arc::clone(&produce_counter);
-                builder.spawn_scoped(s, move || {
-                    let mut id = counter.fetch_add(1, Ordering::AcqRel);
-                    while id < max_messages {
-                        match produce_queue.get_produce_slot() {
-                            Ok(mut produce_slot) => {
-                                let produce_str = format!("hello-{}", id);
-                                copy_str_to_slice(&produce_str, &mut produce_slot.data);
-                                print!("{}:{}\n", produce_slot.index, produce_str);
-                                produce_queue.mark_slot_produced(produce_slot).unwrap();
+                builder
+                    .spawn_scoped(s, move || {
+                        let mut id = counter.fetch_add(1, Ordering::AcqRel);
+                        while id < max_messages {
+                            match produce_queue.get_produce_slot() {
+                                Ok(mut produce_slot) => {
+                                    let produce_str = format!("hello-{}", id);
+                                    copy_str_to_slice(&produce_str, &mut produce_slot.data);
+                                    print!("{}:{}\n", produce_slot.index, produce_str);
+                                    produce_queue.mark_slot_produced(produce_slot).unwrap();
 
-                                assert!(sent_ids.lock().unwrap().insert(id), "duplicate message sent: {}", produce_str);
-                                id = counter.fetch_add(1, Ordering::AcqRel);
+                                    assert!(
+                                        sent_ids.lock().unwrap().insert(id),
+                                        "duplicate message sent: {}",
+                                        produce_str
+                                    );
+                                    id = counter.fetch_add(1, Ordering::AcqRel);
+                                }
+                                Err(YCQueueError::OutOfSpace) | Err(YCQueueError::SlotNotReady) => {
+                                    // queue is full, just spin
+                                    std::thread::yield_now();
+                                }
+                                Err(e) => {
+                                    panic!("unexpected error when producing: {:?}", e);
+                                }
                             }
-                            Err(YCQueueError::OutOfSpace) | Err(YCQueueError::SlotNotReady) => {
-                                // queue is full, just spin
-                                std::thread::yield_now();
-                            }
-                            Err(e) => {
-                                panic!("unexpected error when producing: {:?}", e);
+
+                            if std::time::Instant::now() > deadline {
+                                panic!("test timed out after {:?}", timeout);
                             }
                         }
-
-                        if std::time::Instant::now() > deadline {
-                            panic!("test timed out after {:?}", timeout);
-                        }
-                    }
-                }).unwrap();
+                    })
+                    .unwrap();
             }
         });
 
@@ -204,7 +226,11 @@ mod tests {
 
         // make sure we sent all the messages
         for i in 0..max_messages {
-            assert!(sent_ids.lock().unwrap().contains(&i), "missing sent id: {}", i);
+            assert!(
+                sent_ids.lock().unwrap().contains(&i),
+                "missing sent id: {}",
+                i
+            );
         }
 
         // make sure we got all the messages
@@ -212,7 +238,12 @@ mod tests {
         assert_eq!(received_ids.len(), max_messages as usize);
 
         for i in 0..max_messages {
-            assert!(received_ids.contains(&i), "missing received id: {}, ids: {:?}", i, received_ids);
+            assert!(
+                received_ids.contains(&i),
+                "missing received id: {}, ids: {:?}",
+                i,
+                received_ids
+            );
         }
     }
 }

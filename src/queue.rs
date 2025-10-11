@@ -3,7 +3,7 @@ use std::{cell::Cell, sync::atomic::Ordering};
 use crate::queue_meta::YCQueueU64Meta;
 
 use crate::utils::get_bit;
-use crate::{utils, YCQueueError, YCQueueSharedMeta};
+use crate::{YCQueueError, YCQueueSharedMeta, utils};
 
 #[derive(Debug)]
 pub struct YCQueueProduceSlot<'a> {
@@ -30,7 +30,7 @@ pub struct YCQueue<'a> {
     slot_size: u16,
 }
 
-impl<'a> YCQueue <'a> {
+impl<'a> YCQueue<'a> {
     pub fn new(
         shared_metadata: YCQueueSharedMeta<'a>,
         data_region: &'a mut [u8],
@@ -46,7 +46,7 @@ impl<'a> YCQueue <'a> {
         for slot in data_region.chunks_exact_mut(slot_size).into_iter() {
             slots.push(Cell::new(Some(slot)));
         }
-            
+
         if shared_metadata.slot_count.load(Ordering::Acquire) as usize != slot_count {
             return Err(YCQueueError::InvalidArgs);
         }
@@ -84,11 +84,13 @@ impl<'a> YCQueue <'a> {
             };
 
             match atomic.compare_exchange(value, new_value, Ordering::AcqRel, Ordering::Acquire) {
-                Ok(_) => if get_bit(&value, bit_idx) {
-                    return YCQueueOwner::Consumer;
-                } else {
-                    return YCQueueOwner::Producer;
-                },
+                Ok(_) => {
+                    if get_bit(&value, bit_idx) {
+                        return YCQueueOwner::Consumer;
+                    } else {
+                        return YCQueueOwner::Producer;
+                    }
+                }
                 Err(_) => continue,
             }
         }
@@ -112,9 +114,9 @@ impl<'a> YCQueue <'a> {
 
     pub fn get_produce_slot(&mut self) -> Result<YCQueueProduceSlot<'a>, YCQueueError> {
         /*
-         * In order to get a produce slot, we need to make sure it is marked as owned by producer 
-         * (consumer has finished using it). Queue slots are reserved in-order but may be marked 
-         * as ready for consumption out of order. 
+         * In order to get a produce slot, we need to make sure it is marked as owned by producer
+         * (consumer has finished using it). Queue slots are reserved in-order but may be marked
+         * as ready for consumption out of order.
          */
 
         // find out what produce idx we should be using
@@ -124,7 +126,9 @@ impl<'a> YCQueue <'a> {
             let mut meta = YCQueueU64Meta::from_u64(value);
 
             // quick check for full queue
-            if meta.produce_idx == meta.consume_idx && (meta.in_flight > 0 || meta.produce_pending > 0) {
+            if meta.produce_idx == meta.consume_idx
+                && (meta.in_flight > 0 || meta.produce_pending > 0)
+            {
                 return Err(YCQueueError::OutOfSpace);
             }
 
@@ -140,7 +144,12 @@ impl<'a> YCQueue <'a> {
 
             // update shared memory with new produce_idx
             let new_value = meta.to_u64();
-            match self.shared_metadata.u64_meta.compare_exchange(value, new_value, Ordering::AcqRel, Ordering::Acquire) {
+            match self.shared_metadata.u64_meta.compare_exchange(
+                value,
+                new_value,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
                 Ok(_) => (),
                 Err(_) => continue,
             }
@@ -154,17 +163,25 @@ impl<'a> YCQueue <'a> {
         // hand out the slice that corresponds to this slot
         let slot_data = self.slots[produce_idx as usize].replace(None);
         match slot_data {
-            Some(data) => return Ok(YCQueueProduceSlot {index: produce_idx, data}),
+            Some(data) => {
+                return Ok(YCQueueProduceSlot {
+                    index: produce_idx,
+                    data,
+                });
+            }
             None => panic!("We double-loaned out produce index {:?}", produce_idx),
         }
     }
 
-    pub fn mark_slot_produced(&mut self, queue_slot: YCQueueProduceSlot<'a>) -> Result<(), YCQueueError> {
+    pub fn mark_slot_produced(
+        &mut self,
+        queue_slot: YCQueueProduceSlot<'a>,
+    ) -> Result<(), YCQueueError> {
         /*
-         * Marking a slot as produced gives it to the consumer to consume. These are not required 
+         * Marking a slot as produced gives it to the consumer to consume. These are not required
          * to happen in the same order the slots were reserved. This updates the in-flight count.
          */
-        
+
         if queue_slot.data.len() != self.slot_size as usize {
             return Err(YCQueueError::InvalidArgs);
         }
@@ -174,8 +191,8 @@ impl<'a> YCQueue <'a> {
         let old_data = self.slots[produce_idx as usize].replace(Some(queue_slot.data));
 
         debug_assert_eq!(old_data, None);
-        
-        // update the bitfield. 
+
+        // update the bitfield.
         let old_owner = self.set_owner(produce_idx, YCQueueOwner::Consumer);
         debug_assert_eq!(old_owner, YCQueueOwner::Producer);
 
@@ -192,7 +209,12 @@ impl<'a> YCQueue <'a> {
             debug_assert!(meta.in_flight <= self.slot_count);
 
             let new_value = meta.to_u64();
-            match self.shared_metadata.u64_meta.compare_exchange(value, new_value, Ordering::AcqRel, Ordering::Acquire) {
+            match self.shared_metadata.u64_meta.compare_exchange(
+                value,
+                new_value,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
                 Ok(_) => (),
                 Err(_) => continue,
             }
@@ -225,7 +247,12 @@ impl<'a> YCQueue <'a> {
             meta.in_flight -= 1;
 
             let new_value = meta.to_u64();
-            match self.shared_metadata.u64_meta.compare_exchange(value, new_value, Ordering::AcqRel, Ordering::Acquire) {
+            match self.shared_metadata.u64_meta.compare_exchange(
+                value,
+                new_value,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
                 Ok(_) => (),
                 Err(_) => continue,
             }
@@ -236,12 +263,20 @@ impl<'a> YCQueue <'a> {
 
         let slot_data = self.slots[consume_idx as usize].replace(None);
         match slot_data {
-            Some(data) => return Ok(YCQueueConsumeSlot {index: consume_idx, data}),
+            Some(data) => {
+                return Ok(YCQueueConsumeSlot {
+                    index: consume_idx,
+                    data,
+                });
+            }
             None => panic!("We double-loaned out consume index {:?}", consume_idx),
         }
     }
 
-    pub fn mark_slot_consumed(&mut self, queue_slot: YCQueueConsumeSlot<'a>) -> Result<(), YCQueueError> {
+    pub fn mark_slot_consumed(
+        &mut self,
+        queue_slot: YCQueueConsumeSlot<'a>,
+    ) -> Result<(), YCQueueError> {
         if queue_slot.data.len() != self.slot_size as usize {
             return Err(YCQueueError::InvalidArgs);
         }
@@ -258,5 +293,4 @@ impl<'a> YCQueue <'a> {
 
         Ok(())
     }
-
 }

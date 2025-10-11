@@ -15,21 +15,33 @@ impl YCQueueOwnedMeta {
         let slot_count = AtomicU16::new(slot_count_u16);
         let slot_size = AtomicU16::new(slot_size_u16);
         let produce_meta = AtomicU64::new(0);
-        let mut ownership = Vec::<AtomicU64>::with_capacity((slot_count_u16 as usize + u64::BITS as usize - 1) / u64::BITS as usize);
+        let mut ownership = Vec::<AtomicU64>::with_capacity(
+            (slot_count_u16 as usize + u64::BITS as usize - 1) / u64::BITS as usize,
+        );
 
         for _i in 0..ownership.capacity() {
             ownership.push(AtomicU64::new(0));
         }
 
-        YCQueueOwnedMeta {slot_count, slot_size, produce_meta, ownership}
+        YCQueueOwnedMeta {
+            slot_count,
+            slot_size,
+            produce_meta,
+            ownership,
+        }
     }
 }
 
 impl<'a> YCQueueSharedMeta<'a> {
     pub fn new(meta_ref: &YCQueueOwnedMeta) -> YCQueueSharedMeta {
-        YCQueueSharedMeta {slot_count: &meta_ref.slot_count, slot_size: &meta_ref.slot_size, u64_meta: &meta_ref.produce_meta, ownership: &meta_ref.ownership}
+        YCQueueSharedMeta {
+            slot_count: &meta_ref.slot_count,
+            slot_size: &meta_ref.slot_size,
+            u64_meta: &meta_ref.produce_meta,
+            ownership: &meta_ref.ownership,
+        }
     }
-    
+
     pub fn new_from_mut_ptr(ptr: *mut u8) -> Result<YCQueueSharedMeta<'a>, YCQueueError> {
         if ptr.is_null() {
             return Err(YCQueueError::InvalidArgs);
@@ -44,16 +56,23 @@ impl<'a> YCQueueSharedMeta<'a> {
         let produce_meta = unsafe { &*u64_meta_ptr };
 
         let slot_count_u16 = slot_count.load(std::sync::atomic::Ordering::Acquire);
-        let ownership_count = (slot_count_u16 as usize + u64::BITS as usize - 1) / u64::BITS as usize;
+        let ownership_count =
+            (slot_count_u16 as usize + u64::BITS as usize - 1) / u64::BITS as usize;
         let ownership_ptr = unsafe { u64_meta_ptr.add(1) as *mut AtomicU64 };
 
-        let ownership_slice = unsafe { std::slice::from_raw_parts_mut(ownership_ptr, ownership_count) };
+        let ownership_slice =
+            unsafe { std::slice::from_raw_parts_mut(ownership_ptr, ownership_count) };
 
-        Ok(YCQueueSharedMeta {slot_count, slot_size, u64_meta: produce_meta, ownership: ownership_slice})
+        Ok(YCQueueSharedMeta {
+            slot_count,
+            slot_size,
+            u64_meta: produce_meta,
+            ownership: ownership_slice,
+        })
     }
 }
 
-/// A way to hold a YCQueueSharedMeta to share between threads of a particular rust program. Not designed for IPC. 
+/// A way to hold a YCQueueSharedMeta to share between threads of a particular rust program. Not designed for IPC.
 #[derive(Debug)]
 pub struct YCQueueOwnedData {
     pub meta: YCQueueOwnedMeta,
@@ -67,7 +86,11 @@ impl YCQueueOwnedData {
         let mut data = vec![0 as u8; (slot_count_u16 * slot_size_u16) as usize];
         let raw_ptr = data.as_mut_ptr();
 
-        YCQueueOwnedData {meta, data, raw_ptr}
+        YCQueueOwnedData {
+            meta,
+            data,
+            raw_ptr,
+        }
     }
 }
 
@@ -82,6 +105,9 @@ impl<'a> YCQueueSharedData<'a> {
         let meta = YCQueueSharedMeta::new(&owned.meta);
         let data = owned.raw_ptr;
 
-        YCQueueSharedData {meta, data: unsafe { std::slice::from_raw_parts_mut(data, owned.data.len()) }}
+        YCQueueSharedData {
+            meta,
+            data: unsafe { std::slice::from_raw_parts_mut(data, owned.data.len()) },
+        }
     }
 }
