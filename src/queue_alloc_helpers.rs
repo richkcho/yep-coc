@@ -16,7 +16,7 @@ impl YCQueueOwnedMeta {
         let slot_size = AtomicU16::new(slot_size_u16);
         let produce_meta = AtomicU64::new(0);
         let mut ownership = Vec::<AtomicU64>::with_capacity(
-            (slot_count_u16 as usize + u64::BITS as usize - 1) / u64::BITS as usize,
+            (slot_count_u16 as usize).div_ceil(u64::BITS as usize),
         );
 
         for _i in 0..ownership.capacity() {
@@ -33,7 +33,7 @@ impl YCQueueOwnedMeta {
 }
 
 impl<'a> YCQueueSharedMeta<'a> {
-    pub fn new(meta_ref: &YCQueueOwnedMeta) -> YCQueueSharedMeta {
+    pub fn new(meta_ref: &'a YCQueueOwnedMeta) -> YCQueueSharedMeta<'a> {
         YCQueueSharedMeta {
             slot_count: &meta_ref.slot_count,
             slot_size: &meta_ref.slot_size,
@@ -57,8 +57,8 @@ impl<'a> YCQueueSharedMeta<'a> {
 
         let slot_count_u16 = slot_count.load(std::sync::atomic::Ordering::Acquire);
         let ownership_count =
-            (slot_count_u16 as usize + u64::BITS as usize - 1) / u64::BITS as usize;
-        let ownership_ptr = unsafe { u64_meta_ptr.add(1) as *mut AtomicU64 };
+            (slot_count_u16 as usize).div_ceil(u64::BITS as usize);
+        let ownership_ptr = unsafe { u64_meta_ptr.add(1) };
 
         let ownership_slice =
             unsafe { std::slice::from_raw_parts_mut(ownership_ptr, ownership_count) };
@@ -83,7 +83,7 @@ pub struct YCQueueOwnedData {
 impl YCQueueOwnedData {
     pub fn new(slot_count_u16: u16, slot_size_u16: u16) -> YCQueueOwnedData {
         let meta = YCQueueOwnedMeta::new(slot_count_u16, slot_size_u16);
-        let mut data = vec![0 as u8; (slot_count_u16 * slot_size_u16) as usize];
+        let mut data = vec![0_u8; (slot_count_u16 * slot_size_u16) as usize];
         let raw_ptr = data.as_mut_ptr();
 
         YCQueueOwnedData {

@@ -38,7 +38,7 @@ impl YCQueueU64Meta {
         }
     }
 
-    pub(crate) fn to_u64(&self) -> u64 {
+    pub(crate) fn to_u64(self) -> u64 {
         let mut value: u64 = self.consume_idx as u64;
         value <<= u16::BITS;
         value |= self.produce_pending as u64;

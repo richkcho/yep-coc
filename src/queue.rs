@@ -38,12 +38,12 @@ impl<'a> YCQueue<'a> {
         let slot_size = shared_metadata.slot_size.load(Ordering::Acquire) as usize;
         let slot_count = data_region.len() / slot_size;
 
-        if data_region.len() % slot_size != 0 {
+        if !data_region.len().is_multiple_of(slot_size) {
             return Err(YCQueueError::InvalidArgs);
         }
 
         let mut slots = Vec::<Cell<Option<&'a mut [u8]>>>::with_capacity(slot_count);
-        for slot in data_region.chunks_exact_mut(slot_size).into_iter() {
+        for slot in data_region.chunks_exact_mut(slot_size) {
             slots.push(Cell::new(Some(slot)));
         }
 
@@ -164,10 +164,10 @@ impl<'a> YCQueue<'a> {
         let slot_data = self.slots[produce_idx as usize].replace(None);
         match slot_data {
             Some(data) => {
-                return Ok(YCQueueProduceSlot {
+                Ok(YCQueueProduceSlot {
                     index: produce_idx,
                     data,
-                });
+                })
             }
             None => panic!("We double-loaned out produce index {:?}", produce_idx),
         }
@@ -264,10 +264,10 @@ impl<'a> YCQueue<'a> {
         let slot_data = self.slots[consume_idx as usize].replace(None);
         match slot_data {
             Some(data) => {
-                return Ok(YCQueueConsumeSlot {
+                Ok(YCQueueConsumeSlot {
                     index: consume_idx,
                     data,
-                });
+                })
             }
             None => panic!("We double-loaned out consume index {:?}", consume_idx),
         }
