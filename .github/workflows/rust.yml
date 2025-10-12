@@ -6,8 +6,11 @@ on:
       - main
     paths:
       - .github/workflows/**
+      - Cargo.toml
+      - examples/**
       - src/**
       - tests/**
+      - test_support/**
   pull_request_review:
     types: [submitted] # only run on approved PRs, so when it is submitted
   issue_comment:
