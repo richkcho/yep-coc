@@ -11,6 +11,12 @@ pub struct YCQueueSharedMeta<'a> {
     pub(crate) ownership: &'a [AtomicU64],
 }
 
+/// Producer and consumer counters live here. This is all in one atomic u64 to allow for atomic updates of all
+/// fields at once. This has the drawback that the fields occupy the same cache line. Howeer, for a produce +
+/// consume operation, both producer and consumer will need to synchronize on both producer and consumer counters,
+/// so splitting it into separate cache lines may not be beneficial. It's likely hw dependent, but I don't know
+/// without data first. 
+/// TODO: revisit this decision once I have the benchmarks and data. 
 #[derive(Copy, Clone, Debug)]
 pub(crate) struct YCQueueU64Meta {
     /// where to currently produce into
