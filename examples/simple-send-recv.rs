@@ -1,17 +1,12 @@
 use clap::Parser;
 use std::thread;
-use test_support::utils::{copy_str_to_slice, str_from_u8};
+use test_support::utils::{align_to_cache_line, copy_str_to_slice, str_from_u8};
 use yep_coc::{
     YCQueue, YCQueueError, queue_alloc_helpers::YCQueueOwnedData,
     queue_alloc_helpers::YCQueueSharedData,
 };
 
-const CACHE_LINE_SIZE: u16 = 64;
 const PATTERN: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-
-fn align_to_cache_line(size: u16) -> u16 {
-    ((size + CACHE_LINE_SIZE - 1) / CACHE_LINE_SIZE) * CACHE_LINE_SIZE
-}
 
 /// A simple send-recv example using YCQueue
 #[derive(Parser, Debug)]

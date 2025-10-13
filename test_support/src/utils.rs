@@ -1,4 +1,6 @@
 // Common utilities for tests
+pub const CACHE_LINE_SIZE: u16 = 64;
+
 pub fn str_to_u8(s: &str) -> &[u8] {
     return s.as_bytes();
 }
@@ -20,4 +22,8 @@ pub fn copy_str_to_slice(s: &str, buf: &mut [u8]) {
 
     buf[..s_bytes.len()].copy_from_slice(s_bytes);
     buf[s_bytes.len()..].fill(0);
+}
+
+pub fn align_to_cache_line(size: u16) -> u16 {
+    ((size + CACHE_LINE_SIZE - 1) / CACHE_LINE_SIZE) * CACHE_LINE_SIZE
 }
