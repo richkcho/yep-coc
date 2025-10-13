@@ -34,7 +34,7 @@ mod tests {
 
         // check queue fields
         assert_eq!(queue_slot_0.index, 0);
-        assert_eq!(queue.in_flight_count(), 0);
+        assert_eq!(queue.in_flight_count(), 1);
         assert_eq!(queue.produce_idx(), 1);
 
         // write the first message
@@ -46,23 +46,23 @@ mod tests {
 
         // check queue fields
         assert_eq!(queue_slot_1.index, 1);
-        assert_eq!(queue.in_flight_count(), 0);
+        assert_eq!(queue.in_flight_count(), 2);
         assert_eq!(queue.produce_idx(), 2);
 
         // write the second message
         let second_test_msg = "general kenobi";
         copy_str_to_slice(second_test_msg, queue_slot_1.data);
 
-        // attempt to consume from empty queue, which should fail
+        // attempt to consume from fully-reserved queue, which should fail
         assert_eq!(
             queue.get_consume_slot().unwrap_err(),
-            YCQueueError::EmptyQueue
+            YCQueueError::SlotNotReady
         );
         assert_eq!(queue.consume_idx(), 0);
 
         // produce into the first queue slot
         queue.mark_slot_produced(queue_slot_0).unwrap();
-        assert_eq!(queue.in_flight_count(), 1);
+        assert_eq!(queue.in_flight_count(), 2);
         assert_eq!(queue.produce_idx(), 2);
 
         // make sure consume idx didn't change somehow
@@ -72,7 +72,7 @@ mod tests {
 
         // check queue fields
         assert_eq!(consume_slot_0.index, 0);
-        assert_eq!(queue.in_flight_count(), 0);
+        assert_eq!(queue.in_flight_count(), 1);
         assert_eq!(queue.consume_idx(), 1);
 
         // check data
@@ -82,7 +82,7 @@ mod tests {
         // attempt to consume from empty queue, which should fail
         assert_eq!(
             queue.get_consume_slot().unwrap_err(),
-            YCQueueError::EmptyQueue
+            YCQueueError::SlotNotReady
         );
         assert_eq!(queue.consume_idx(), 1);
 
@@ -137,7 +137,7 @@ mod tests {
             slots.push(queue.get_produce_slot().unwrap());
         }
 
-        assert_eq!(queue.in_flight_count(), 0);
+        assert_eq!(queue.in_flight_count(), 8);
         assert_eq!(queue.produce_idx(), 0);
         assert_eq!(queue.consume_idx(), 0);
 
@@ -188,6 +188,45 @@ mod tests {
             let consume_slot = queue.get_consume_slot().unwrap();
             queue.mark_slot_consumed(consume_slot).unwrap();
         }
+    }
+
+    #[test]
+    fn batched_produce_consume_test() {
+        let slot_count: u16 = 8;
+        let slot_size: u16 = 64;
+        let batch: u16 = 4;
+
+        let mut owned_data = YCQueueOwnedData::new(slot_count, slot_size);
+        let shared_meta = YCQueueSharedMeta::new(&owned_data.meta);
+        let mut queue = YCQueue::new(shared_meta, owned_data.data.as_mut_slice()).unwrap();
+
+        let mut produce_slots = queue.get_produce_slots(batch).unwrap();
+        for (i, slot) in produce_slots.iter_mut().enumerate() {
+            let message = format!("msg-{i}");
+            copy_str_to_slice(&message, slot.data);
+        }
+
+        queue.mark_slots_produced(produce_slots).unwrap();
+        assert_eq!(queue.in_flight_count(), batch);
+        assert_eq!(queue.produce_idx(), batch);
+
+        let consume_slots = queue.get_consume_slots(batch).unwrap();
+        for (i, slot) in consume_slots.iter().enumerate() {
+            let expected = format!("msg-{i}");
+            assert_eq!(str_from_u8(slot.data), expected);
+        }
+        assert_eq!(queue.consume_idx(), batch);
+        assert_eq!(queue.in_flight_count(), 0);
+
+        queue.mark_slots_consumed(consume_slots).unwrap();
+        assert_eq!(queue.in_flight_count(), 0);
+        assert_eq!(queue.produce_idx(), batch);
+        assert_eq!(queue.consume_idx(), batch);
+
+        // queue should now allow another batched produce
+        let next_slots = queue.get_produce_slots(batch).unwrap();
+        assert_eq!(next_slots[0].index, batch);
+        queue.mark_slots_produced(next_slots).unwrap();
     }
 
     #[test]
@@ -333,5 +372,71 @@ mod tests {
         );
         assert_eq!(queue.in_flight_count(), 0);
         assert_eq!(queue.produce_idx(), queue.consume_idx());
+    }
+
+    #[test]
+    fn full_queue_wraparound_test() {
+        let slot_count: u16 = 8;
+        let slot_size: u16 = 64;
+
+        let mut owned_data = YCQueueOwnedData::new(slot_count, slot_size);
+        let shared_meta = YCQueueSharedMeta::new(&owned_data.meta);
+        let mut queue = YCQueue::new(shared_meta, owned_data.data.as_mut_slice()).unwrap();
+
+        for round in 0..slot_count {
+            // Step 1: produce entire queue
+            let mut full_batch = queue.get_produce_slots(slot_count).unwrap();
+            for (idx, slot) in full_batch.iter_mut().enumerate() {
+                let msg = format!("batch1-{round}-{idx}");
+                copy_str_to_slice(&msg, slot.data);
+            }
+            queue.mark_slots_produced(full_batch).unwrap();
+
+            // Step 2: consume entire queue
+            for idx in 0..slot_count {
+                let slot = queue.get_consume_slot().unwrap();
+                let expected = format!("batch1-{round}-{idx}");
+                assert_eq!(str_from_u8(slot.data), expected);
+                queue.mark_slot_consumed(slot).unwrap();
+            }
+            assert_eq!(queue.in_flight_count(), 0);
+
+            // Step 3: produce and consume a single message
+            let single = queue.get_produce_slot().unwrap();
+            let single_msg = format!("single-{round}");
+            copy_str_to_slice(&single_msg, single.data);
+            queue.mark_slot_produced(single).unwrap();
+
+            let single_consumed = queue.get_consume_slot().unwrap();
+            assert_eq!(str_from_u8(single_consumed.data), single_msg);
+            queue.mark_slot_consumed(single_consumed).unwrap();
+            assert_eq!(queue.in_flight_count(), 0);
+
+            // Step 4: repeat produce/consume entire queue
+            let mut second_batch = queue.get_produce_slots(slot_count).unwrap();
+            for (idx, slot) in second_batch.iter_mut().enumerate() {
+                let msg = format!("batch2-{round}-{idx}");
+                copy_str_to_slice(&msg, slot.data);
+            }
+            queue.mark_slots_produced(second_batch).unwrap();
+
+            for idx in 0..slot_count {
+                let slot = match queue.get_consume_slot() {
+                    Ok(slot) => slot,
+                    Err(err) => panic!(
+                        "round {}: expected slot ready but got {:?} (in_flight {}, produce_idx {}, consume_idx {})",
+                        round,
+                        err,
+                        queue.in_flight_count(),
+                        queue.produce_idx(),
+                        queue.consume_idx()
+                    ),
+                };
+                let expected = format!("batch2-{round}-{idx}");
+                assert_eq!(str_from_u8(slot.data), expected);
+                queue.mark_slot_consumed(slot).unwrap();
+            }
+            assert_eq!(queue.in_flight_count(), 0);
+        }
     }
 }

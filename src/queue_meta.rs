@@ -15,16 +15,14 @@ pub struct YCQueueSharedMeta<'a> {
 /// fields at once. This has the drawback that the fields occupy the same cache line. Howeer, for a produce +
 /// consume operation, both producer and consumer will need to synchronize on both producer and consumer counters,
 /// so splitting it into separate cache lines may not be beneficial. It's likely hw dependent, but I don't know
-/// without data first. 
-/// TODO: revisit this decision once I have the benchmarks and data. 
+/// without data first.
+/// TODO: revisit this decision once I have the benchmarks and data.
 #[derive(Copy, Clone, Debug)]
 pub(crate) struct YCQueueU64Meta {
     /// where to currently produce into
     pub(crate) produce_idx: u16,
     /// where to consume from
     pub(crate) consume_idx: u16,
-    /// how many messages are reserved
-    pub(crate) produce_pending: u16,
     // how many in-flight messages there are
     pub(crate) in_flight: u16,
 }
@@ -34,20 +32,16 @@ impl YCQueueU64Meta {
         let produce_idx = value as u16;
         let consume_idx = (value >> u16::BITS) as u16;
         let in_flight = (value >> (2 * u16::BITS)) as u16;
-        let pending = (value >> (3 * u16::BITS)) as u16;
 
         YCQueueU64Meta {
             produce_idx,
             consume_idx,
             in_flight,
-            produce_pending: pending,
         }
     }
 
     pub(crate) fn to_u64(self) -> u64 {
         let mut value: u64 = self.consume_idx as u64;
-        value <<= u16::BITS;
-        value |= self.produce_pending as u64;
         value <<= u16::BITS;
         value |= self.in_flight as u64;
         value <<= u16::BITS;
@@ -70,18 +64,15 @@ mod tests {
         assert_eq!(meta.produce_idx, 0);
         assert_eq!(meta.consume_idx, 0);
         assert_eq!(meta.in_flight, 0);
-        assert_eq!(meta.produce_pending, 0);
         assert_eq!(meta.to_u64(), 0);
 
         let test_produce_idx: u16 = 1;
         let test_consume_idx: u16 = 2;
         let test_in_flight: u16 = 3;
-        let test_pending: u16 = 4;
 
         meta.produce_idx = test_produce_idx;
         meta.consume_idx = test_consume_idx;
         meta.in_flight = test_in_flight;
-        meta.produce_pending = test_pending;
 
         // create new meta as copy from u64
         let new_meta = YCQueueU64Meta::from_u64(meta.to_u64());
@@ -93,6 +84,5 @@ mod tests {
         assert_eq!(meta.produce_idx, new_meta.produce_idx);
         assert_eq!(meta.consume_idx, new_meta.consume_idx);
         assert_eq!(meta.in_flight, new_meta.in_flight);
-        assert_eq!(meta.produce_pending, new_meta.produce_pending);
     }
 }
