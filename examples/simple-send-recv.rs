@@ -59,6 +59,10 @@ fn main() {
         panic!("in_flight_count cannot be larger than queue_depth");
     }
 
+    if args.in_flight_count == 0 || args.queue_depth == 0 {
+        panic!("in_flight_count and queue_depth must be greater than zero");
+    }
+
     // Create the queue with shared data regions
     let owned_data = YCQueueOwnedData::new(args.queue_depth, slot_size);
     let consumer_data = YCQueueSharedData::from_owned_data(&owned_data);
