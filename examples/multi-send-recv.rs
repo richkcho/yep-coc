@@ -134,26 +134,27 @@ fn main() {
     }
 
     let consumed_count = Arc::new(AtomicU32::new(0));
-    let validation_storage = Arc::new(Mutex::new(Vec::with_capacity(
-        if args.msg_check_len > 0 {
-            args.msg_count as usize
-        } else {
-            0
-        },
-    )));
+    let validation_storage = Arc::new(Mutex::new(Vec::with_capacity(if args.msg_check_len > 0 {
+        args.msg_count as usize
+    } else {
+        0
+    })));
     let producer_thread_count = args.producer_threads as u32;
     let base_messages_per_thread = args.msg_count / producer_thread_count;
     let extra_messages = args.msg_count % producer_thread_count;
 
-    let earliest_producer_start =
-        Arc::new(Mutex::new(None::<std::time::Instant>));
+    let earliest_producer_start = Arc::new(Mutex::new(None::<std::time::Instant>));
     let latest_consumer_end = Arc::new(Mutex::new(None::<std::time::Instant>));
 
     thread::scope(|s| {
         let mut next_index = 0u32;
 
         for (thread_idx, mut queue) in producer_queues.into_iter().enumerate() {
-            let extra = if thread_idx < extra_messages as usize { 1u32 } else { 0u32 };
+            let extra = if thread_idx < extra_messages as usize {
+                1u32
+            } else {
+                0u32
+            };
             let range_start = next_index;
             let range_end = range_start + base_messages_per_thread + extra;
             next_index = range_end;

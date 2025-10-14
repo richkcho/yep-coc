@@ -15,9 +15,8 @@ impl YCQueueOwnedMeta {
         let slot_count = AtomicU16::new(slot_count_u16);
         let slot_size = AtomicU16::new(slot_size_u16);
         let produce_meta = AtomicU64::new(0);
-        let mut ownership = Vec::<AtomicU64>::with_capacity(
-            (slot_count_u16 as usize).div_ceil(u64::BITS as usize),
-        );
+        let mut ownership =
+            Vec::<AtomicU64>::with_capacity((slot_count_u16 as usize).div_ceil(u64::BITS as usize));
 
         for _i in 0..ownership.capacity() {
             ownership.push(AtomicU64::new(0));
@@ -56,8 +55,7 @@ impl<'a> YCQueueSharedMeta<'a> {
         let produce_meta = unsafe { &*u64_meta_ptr };
 
         let slot_count_u16 = slot_count.load(std::sync::atomic::Ordering::Acquire);
-        let ownership_count =
-            (slot_count_u16 as usize).div_ceil(u64::BITS as usize);
+        let ownership_count = (slot_count_u16 as usize).div_ceil(u64::BITS as usize);
         let ownership_ptr = unsafe { u64_meta_ptr.add(1) };
 
         let ownership_slice =
