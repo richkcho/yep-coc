@@ -1,5 +1,5 @@
 #[cfg(test)]
-mod tests {
+mod multi_thread_tests {
     use std::collections::HashSet;
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::{Arc, Mutex};

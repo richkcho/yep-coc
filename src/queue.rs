@@ -31,6 +31,17 @@ pub struct YCQueue<'a> {
 }
 
 impl<'a> YCQueue<'a> {
+    /// Create a queue backed by shared metadata and a contiguous data region.
+    ///
+    /// ```
+    /// use yep_coc::queue_alloc_helpers::YCQueueOwnedData;
+    /// use yep_coc::{YCQueue, YCQueueSharedMeta};
+    ///
+    /// let mut owned = YCQueueOwnedData::new(4, 32);
+    /// let shared = YCQueueSharedMeta::new(&owned.meta);
+    /// let queue = YCQueue::new(shared, owned.data.as_mut_slice());
+    /// assert!(queue.is_ok());
+    /// ```
     pub fn new(
         shared_metadata: YCQueueSharedMeta<'a>,
         data_region: &'a mut [u8],
@@ -215,18 +226,49 @@ impl<'a> YCQueue<'a> {
         YCQueueU64Meta::from_u64(self.shared_metadata.u64_meta.load(Ordering::Acquire))
     }
 
+    /// Returns the number of slots that have been produced but not yet consumed.
+    ///
+    /// ```
+    /// use yep_coc::queue_alloc_helpers::YCQueueOwnedData;
+    /// use yep_coc::{YCQueue, YCQueueSharedMeta};
+    ///
+    /// let mut owned = YCQueueOwnedData::new(2, 16);
+    /// let shared = YCQueueSharedMeta::new(&owned.meta);
+    /// let mut queue = YCQueue::new(shared, owned.data.as_mut_slice()).unwrap();
+    ///
+    /// assert_eq!(queue.in_flight_count(), 0);
+    /// let slot = queue.get_produce_slot().unwrap();
+    /// queue.mark_slot_produced(slot).unwrap();
+    /// assert_eq!(queue.in_flight_count(), 1);
+    /// ```
     pub fn in_flight_count(&self) -> u16 {
         self.get_u64_meta().in_flight
     }
 
+    /// Returns the circular index that will be reserved by the next producer call.
     pub fn produce_idx(&self) -> u16 {
         self.get_u64_meta().produce_idx
     }
 
+    /// Returns the circular index that will be reserved by the next consumer call.
     pub fn consume_idx(&self) -> u16 {
         self.get_u64_meta().consume_idx
     }
 
+    /// Reserve up to `num_slots` contiguous slots for production.
+    ///
+    /// ```
+    /// use yep_coc::queue_alloc_helpers::YCQueueOwnedData;
+    /// use yep_coc::{YCQueue, YCQueueSharedMeta};
+    ///
+    /// let mut owned = YCQueueOwnedData::new(4, 16);
+    /// let shared = YCQueueSharedMeta::new(&owned.meta);
+    /// let mut queue = YCQueue::new(shared, owned.data.as_mut_slice()).unwrap();
+    ///
+    /// let slots = queue.get_produce_slots(2).unwrap();
+    /// assert_eq!(slots.len(), 2);
+    /// queue.mark_slots_produced(slots).unwrap();
+    /// ```
     pub fn get_produce_slots(
         &mut self,
         num_slots: u16,
@@ -291,6 +333,21 @@ impl<'a> YCQueue<'a> {
         Ok(slots)
     }
 
+    /// Reserve a single slot for production convenience.
+    ///
+    /// ```
+    /// use yep_coc::queue_alloc_helpers::YCQueueOwnedData;
+    /// use yep_coc::{YCQueue, YCQueueSharedMeta};
+    ///
+    /// let mut owned = YCQueueOwnedData::new(2, 16);
+    /// let shared = YCQueueSharedMeta::new(&owned.meta);
+    /// let mut queue = YCQueue::new(shared, owned.data.as_mut_slice()).unwrap();
+    /// 
+    /// // Reserve a slot
+    /// let slot = queue.get_produce_slot().unwrap();
+    /// // Fill it with data
+    /// slot.data.fill(0xAB);
+    /// ```
     pub fn get_produce_slot(&mut self) -> Result<YCQueueProduceSlot<'a>, YCQueueError> {
         let mut slots = self.get_produce_slots(1)?;
 
@@ -299,6 +356,20 @@ impl<'a> YCQueue<'a> {
             .expect("get_produce_slots(1) returned without a slot"))
     }
 
+    /// Return a single production slot to the queue as ready for consumers.
+    ///
+    /// ```
+    /// use yep_coc::queue_alloc_helpers::YCQueueOwnedData;
+    /// use yep_coc::{YCQueue, YCQueueSharedMeta};
+    ///
+    /// let mut owned = YCQueueOwnedData::new(2, 16);
+    /// let shared = YCQueueSharedMeta::new(&owned.meta);
+    /// let mut queue = YCQueue::new(shared, owned.data.as_mut_slice()).unwrap();
+    ///
+    /// let slot = queue.get_produce_slot().unwrap();
+    /// queue.mark_slot_produced(slot).unwrap();
+    /// assert_eq!(queue.in_flight_count(), 1);
+    /// ```
     pub fn mark_slot_produced(
         &mut self,
         queue_slot: YCQueueProduceSlot<'a>,
@@ -325,6 +396,20 @@ impl<'a> YCQueue<'a> {
         Ok(())
     }
 
+    /// Return multiple production slots to the queue in one operation.
+    ///
+    /// ```
+    /// use yep_coc::queue_alloc_helpers::YCQueueOwnedData;
+    /// use yep_coc::{YCQueue, YCQueueSharedMeta};
+    ///
+    /// let mut owned = YCQueueOwnedData::new(4, 16);
+    /// let shared = YCQueueSharedMeta::new(&owned.meta);
+    /// let mut queue = YCQueue::new(shared, owned.data.as_mut_slice()).unwrap();
+    ///
+    /// let slots = queue.get_produce_slots(4).unwrap();
+    /// queue.mark_slots_produced(slots).unwrap();
+    /// assert_eq!(queue.in_flight_count(), 4);
+    /// ```
     pub fn mark_slots_produced(
         &mut self,
         queue_slots: Vec<YCQueueProduceSlot<'a>>,
@@ -361,6 +446,21 @@ impl<'a> YCQueue<'a> {
         self.set_owner_range(start_index, count as u16, YCQueueOwner::Consumer)
     }
 
+    /// Reserve up to `num_slots` contiguous slots for consumption.
+    ///
+    /// ```
+    /// use yep_coc::queue_alloc_helpers::YCQueueOwnedData;
+    /// use yep_coc::{YCQueue, YCQueueSharedMeta};
+    ///
+    /// let mut owned = YCQueueOwnedData::new(4, 16);
+    /// let shared = YCQueueSharedMeta::new(&owned.meta);
+    /// let mut queue = YCQueue::new(shared, owned.data.as_mut_slice()).unwrap();
+    ///
+    /// let produce = queue.get_produce_slots(2).unwrap();
+    /// queue.mark_slots_produced(produce).unwrap();
+    /// let consume = queue.get_consume_slots(2).unwrap();
+    /// assert_eq!(consume.len(), 2);
+    /// ```
     pub fn get_consume_slots(
         &mut self,
         num_slots: u16,
@@ -421,6 +521,22 @@ impl<'a> YCQueue<'a> {
         Ok(slots)
     }
 
+    /// Reserve a single slot for consumption.
+    ///
+    /// ```
+    /// use yep_coc::queue_alloc_helpers::YCQueueOwnedData;
+    /// use yep_coc::{YCQueue, YCQueueSharedMeta};
+    ///
+    /// let mut owned = YCQueueOwnedData::new(2, 16);
+    /// let shared = YCQueueSharedMeta::new(&owned.meta);
+    /// let mut queue = YCQueue::new(shared, owned.data.as_mut_slice()).unwrap();
+    ///
+    /// let slot = queue.get_produce_slot().unwrap();
+    /// queue.mark_slot_produced(slot).unwrap();
+    ///
+    /// let consume = queue.get_consume_slot().unwrap();
+    /// assert_eq!(consume.index, 0);
+    /// ```
     pub fn get_consume_slot(&mut self) -> Result<YCQueueConsumeSlot<'a>, YCQueueError> {
         let mut slots = self.get_consume_slots(1)?;
 
@@ -429,6 +545,22 @@ impl<'a> YCQueue<'a> {
             .expect("get_consume_slots(1) returned without a slot"))
     }
 
+    /// Return an individual consumption slot back to the producer pool.
+    ///
+    /// ```
+    /// use yep_coc::queue_alloc_helpers::YCQueueOwnedData;
+    /// use yep_coc::{YCQueue, YCQueueSharedMeta};
+    ///
+    /// let mut owned = YCQueueOwnedData::new(2, 16);
+    /// let shared = YCQueueSharedMeta::new(&owned.meta);
+    /// let mut queue = YCQueue::new(shared, owned.data.as_mut_slice()).unwrap();
+    ///
+    /// let slot = queue.get_produce_slot().unwrap();
+    /// queue.mark_slot_produced(slot).unwrap();
+    /// let consume = queue.get_consume_slot().unwrap();
+    /// queue.mark_slot_consumed(consume).unwrap();
+    /// assert_eq!(queue.in_flight_count(), 0);
+    /// ```
     pub fn mark_slot_consumed(
         &mut self,
         queue_slot: YCQueueConsumeSlot<'a>,
@@ -450,6 +582,22 @@ impl<'a> YCQueue<'a> {
         Ok(())
     }
 
+    /// Return multiple consumption slots back to the producer pool at once.
+    ///
+    /// ```
+    /// use yep_coc::queue_alloc_helpers::YCQueueOwnedData;
+    /// use yep_coc::{YCQueue, YCQueueSharedMeta};
+    ///
+    /// let mut owned = YCQueueOwnedData::new(4, 16);
+    /// let shared = YCQueueSharedMeta::new(&owned.meta);
+    /// let mut queue = YCQueue::new(shared, owned.data.as_mut_slice()).unwrap();
+    ///
+    /// let produce = queue.get_produce_slots(4).unwrap();
+    /// queue.mark_slots_produced(produce).unwrap();
+    /// let consume = queue.get_consume_slots(4).unwrap();
+    /// queue.mark_slots_consumed(consume).unwrap();
+    /// assert_eq!(queue.in_flight_count(), 0);
+    /// ```
     pub fn mark_slots_consumed(
         &mut self,
         queue_slots: Vec<YCQueueConsumeSlot<'a>>,

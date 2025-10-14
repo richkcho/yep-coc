@@ -1,5 +1,5 @@
 #[cfg(test)]
-mod tests {
+mod single_thread_tests {
     use yep_coc::queue_alloc_helpers::YCQueueOwnedData;
     use yep_coc::{YCQueue, YCQueueError, YCQueueProduceSlot, YCQueueSharedMeta};
 
