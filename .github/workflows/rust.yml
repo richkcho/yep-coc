@@ -4,17 +4,10 @@ on:
   push:
     branches:
       - main
-    paths:
-      - .github/workflows/**
-      - Cargo.toml
-      - examples/**
-      - src/**
-      - tests/**
-      - test_support/**
-  pull_request_review:
-    types: [submitted] # only run on approved PRs, so when it is submitted
-  issue_comment:
-    types: [created]
+  pull_request:
+    types: [opened, synchronize, edited, ready_for_review]
+    branches:
+      - main
   workflow_dispatch:
 
 env:
@@ -22,14 +15,6 @@ env:
 
 jobs:
   build-and-test:
-    if: |
-      github.event_name == 'push' || 
-      github.event_name == 'workflow_dispatch' || 
-      (github.event_name == 'pull_request_review' && github.event.review.state == 'approved') ||
-      (github.event_name == 'issue_comment' && github.event.issue.pull_request && contains(github.event.comment.body, '/run-ci') && 
-        (github.event.comment.author_association == 'COLLABORATOR' || github.event.comment.author_association == 'OWNER')
-      )
-
     strategy:
       matrix:
         os: [ubuntu-latest, ubuntu-22.04-arm]
