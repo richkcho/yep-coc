@@ -64,9 +64,9 @@ mod multi_thread_tests {
 
                 while counter < slot_count * num_iterations {
                     match produce_queue.get_produce_slot() {
-                        Ok(mut produce_slot) => {
+                        Ok(produce_slot) => {
                             let produce_str = format!("hello-{}", counter);
-                            copy_str_to_slice(&produce_str, &mut produce_slot.data);
+                            copy_str_to_slice(&produce_str, &mut *produce_slot.data);
                             produce_queue.mark_slot_produced(produce_slot).unwrap();
                             counter += 1;
                         }
@@ -145,16 +145,16 @@ mod multi_thread_tests {
                         Ok(mut slots) => {
                             for (offset, slot) in slots.iter_mut().enumerate() {
                                 let msg = format!("hello-{}", next_to_send + offset);
-                                copy_str_to_slice(&msg, &mut slot.data);
+                                copy_str_to_slice(&msg, &mut *slot.data);
                             }
                             produce_queue.mark_slots_produced(slots).unwrap();
                             next_to_send += request as usize;
                         }
                         Err(YCQueueError::OutOfSpace) | Err(YCQueueError::SlotNotReady) => {
                             match produce_queue.get_produce_slot() {
-                                Ok(mut slot) => {
+                                Ok(slot) => {
                                     let msg = format!("hello-{}", next_to_send);
-                                    copy_str_to_slice(&msg, &mut slot.data);
+                                    copy_str_to_slice(&msg, &mut *slot.data);
                                     produce_queue.mark_slot_produced(slot).unwrap();
                                     next_to_send += 1;
                                 }
@@ -223,10 +223,10 @@ mod multi_thread_tests {
                                     let message = str_from_u8(consume_slot.data);
                                     let id_str = message
                                         .strip_prefix("hello-")
-                                        .expect(format!("bad message: {}", message).as_str());
+                                        .unwrap_or_else(|| panic!("bad message: {}", message));
                                     let id: u32 = id_str
                                         .parse()
-                                        .expect(format!("bad message: {}", message).as_str());
+                                        .unwrap_or_else(|_| panic!("bad message: {}", message));
                                     assert!(
                                         id < max_messages,
                                         "received id out of range: {}, message: {}, slot: {}",
@@ -243,7 +243,7 @@ mod multi_thread_tests {
 
                                     // poison the block after consuming the message to help catch bugs
                                     let poison_str = format!("poisoned-{}", consume_slot.index);
-                                    copy_str_to_slice(&poison_str, consume_slot.data);
+                                    copy_str_to_slice(&poison_str, &mut *consume_slot.data);
 
                                     consume_queue.mark_slot_consumed(consume_slot).unwrap();
                                 }
@@ -275,9 +275,9 @@ mod multi_thread_tests {
                         let mut id = counter.fetch_add(1, Ordering::AcqRel);
                         while id < max_messages {
                             match produce_queue.get_produce_slot() {
-                                Ok(mut produce_slot) => {
+                                Ok(produce_slot) => {
                                     let produce_str = format!("hello-{}", id);
-                                    copy_str_to_slice(&produce_str, &mut produce_slot.data);
+                                    copy_str_to_slice(&produce_str, &mut *produce_slot.data);
                                     produce_queue.mark_slot_produced(produce_slot).unwrap();
 
                                     assert!(
@@ -396,10 +396,10 @@ mod multi_thread_tests {
                                         let message = str_from_u8(slot.data);
                                         let id_str = message
                                             .strip_prefix("hello-")
-                                            .expect(format!("bad message: {}", message).as_str());
+                                            .unwrap_or_else(|| panic!("bad message: {}", message));
                                         let id: u32 = id_str
                                             .parse()
-                                            .expect(format!("bad message: {}", message).as_str());
+                                            .unwrap_or_else(|_| panic!("bad message: {}", message));
                                         assert!(id < max_messages, "id {} out of range", id);
                                         assert!(
                                             received_ids.lock().unwrap().insert(id),
@@ -413,12 +413,13 @@ mod multi_thread_tests {
                                     match consume_queue.get_consume_slot() {
                                         Ok(slot) => {
                                             let message = str_from_u8(slot.data);
-                                            let id_str = message.strip_prefix("hello-").expect(
-                                                format!("bad message: {}", message).as_str(),
-                                            );
-                                            let id: u32 = id_str.parse().expect(
-                                                format!("bad message: {}", message).as_str(),
-                                            );
+                                            let id_str =
+                                                message.strip_prefix("hello-").unwrap_or_else(
+                                                    || panic!("bad message: {}", message),
+                                                );
+                                            let id: u32 = id_str.parse().unwrap_or_else(|_| {
+                                                panic!("bad message: {}", message)
+                                            });
                                             assert!(id < max_messages, "id {} out of range", id);
                                             assert!(
                                                 received_ids.lock().unwrap().insert(id),
@@ -470,7 +471,7 @@ mod multi_thread_tests {
                                         for (offset, slot) in slots.iter_mut().enumerate() {
                                             let id = chunk_start + offset as u32;
                                             let produce_str = format!("hello-{}", id);
-                                            copy_str_to_slice(&produce_str, &mut slot.data);
+                                            copy_str_to_slice(&produce_str, &mut *slot.data);
                                             assert!(
                                                 sent_ids.lock().unwrap().insert(id),
                                                 "duplicate message sent: {}",

@@ -32,8 +32,8 @@ mod tests {
         assert_eq!(clear_bit(&0b100111, 1), 0b100101);
 
         // get bit tests
-        assert_eq!(get_bit(&0b100000, 0), false);
-        assert_eq!(get_bit(&0b100001, 0), true);
-        assert_eq!(get_bit(&0b100111, 1), true);
+        assert!(!get_bit(&0b100000, 0));
+        assert!(get_bit(&0b100001, 0));
+        assert!(get_bit(&0b100111, 1));
     }
 }

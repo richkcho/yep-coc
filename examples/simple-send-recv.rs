@@ -90,7 +90,8 @@ fn main() {
 
                         if args.msg_check_len > 0 {
                             for i in 0..args.msg_check_len as usize {
-                                let expected_char = PATTERN.as_bytes()[((messages_received as usize + i) % PATTERN.len()) as usize];
+                                let expected_char = PATTERN.as_bytes()
+                                    [(messages_received as usize + i) % PATTERN.len()];
                                 let received_char = msg.as_bytes()[i];
                                 if expected_char != received_char {
                                     panic!("Message content mismatch at message {}, byte {}:\nExpected: '{}'\nReceived: '{}'", 
