@@ -6,7 +6,7 @@ My expected users of this queue are users who want to implement high performance
 1. Provide zero-copy API for producers and consumers of the queue. Zero copy in the context of using the queue does not incur an additional copy.
 2. Producers shouldn't block each other when accessing queue data, neither should consumers. Multiple producers should be able to "reserve" a slot, copy / DMA into it, then publish the data. Consumers should also be able to do the same. 
 3. Metadata region should live in a separate memory region than the queue data. The data section should be "corruptible" without breaking queue state - only transferred data should be corrupted. 
-4. No unreasonable assumptions about memory allocator or scheduler that would prevent this library from living in driver code or FW code. 
+4. No unreasonable assumptions about memory allocator or scheduler that would prevent this library from living in driver code or FW code. Currently, the state of the code *does* depend on `std`, but only on `Cell` and atomics, which I feel is reasonable. 
 
 ## Later Goals
 1. Perf benchmark, worry about whether I should store queue info in one atomic vs two. (cache line separation could increase perf if there's high contention)

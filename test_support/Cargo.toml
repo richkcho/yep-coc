@@ -3,3 +3,6 @@ name = "test_support"
 version = "0.0.1"
 edition = "2024"
 publish = false
+
+[dependencies]
+yep-cache-line-size = "0.9"
