@@ -1,7 +1,12 @@
 [package]
 name = "yep-coc"
+description = "Yet another circular buffer. This one happens to be a zero copy, MPMC, lock free queue."
 version = "0.1.0"
 edition = "2024"
+readme = "README.md"
+repository = "https://github.com/richkcho/yep-coc"
+keywords = ["circular", "buffer", "ring", "queue", "zero-copy", "mpmc", "lock-free"]
+categories = ["concurrency", "data_structures"]
 
 [workspace]
 members = ["test_support"]

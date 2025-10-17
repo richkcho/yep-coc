@@ -323,9 +323,10 @@ impl<'a> YCQueue<'a> {
             // make sure all the slots we want are owned by the producer
             let available_slots =
                 self.check_owner(meta.produce_idx, num_slots, YCQueueOwner::Producer);
-            
-            if (!best_effort && available_slots != num_slots) ||
-               (best_effort && available_slots == 0) {
+
+            if (!best_effort && available_slots != num_slots)
+                || (best_effort && available_slots == 0)
+            {
                 return Err(YCQueueError::SlotNotReady);
             }
 
@@ -405,7 +406,7 @@ impl<'a> YCQueue<'a> {
         &mut self,
         num_slots: u16,
     ) -> Result<Vec<YCQueueProduceSlot<'a>>, YCQueueError> {
-        return self.get_produce_slots_internal(num_slots, false);
+        self.get_produce_slots_internal(num_slots, false)
     }
 
     /// Reserve up to `num_slots` contiguous slots to produce into. May return fewer than requested slots when only a partial run is currently free.
@@ -437,7 +438,7 @@ impl<'a> YCQueue<'a> {
         &mut self,
         num_slots: u16,
     ) -> Result<Vec<YCQueueProduceSlot<'a>>, YCQueueError> {
-        return self.get_produce_slots_internal(num_slots, true);
+        self.get_produce_slots_internal(num_slots, true)
     }
 
     /// Reserve a single slot to produce into.
@@ -456,7 +457,7 @@ impl<'a> YCQueue<'a> {
     /// let mut owned = YCQueueOwnedData::new(2, 16);
     /// let shared = YCQueueSharedMeta::new(&owned.meta);
     /// let mut queue = YCQueue::new(shared, owned.data.as_mut_slice()).unwrap();
-    /// 
+    ///
     /// // Reserve a slot
     /// let slot = queue.get_produce_slot().unwrap();
     /// // Fill it with data
@@ -603,8 +604,9 @@ impl<'a> YCQueue<'a> {
 
             let available_slots =
                 self.check_owner(meta.consume_idx, num_slots, YCQueueOwner::Consumer);
-            if (!best_effort && available_slots != num_slots) ||
-               (best_effort && available_slots == 0) {
+            if (!best_effort && available_slots != num_slots)
+                || (best_effort && available_slots == 0)
+            {
                 return Err(YCQueueError::SlotNotReady);
             }
 
@@ -682,7 +684,7 @@ impl<'a> YCQueue<'a> {
         &mut self,
         num_slots: u16,
     ) -> Result<Vec<YCQueueConsumeSlot<'a>>, YCQueueError> {
-        return self.get_consume_slots_internal(num_slots, false);
+        self.get_consume_slots_internal(num_slots, false)
     }
 
     /// Reserve up to `num_slots` contiguous slots for consumption. May return fewer than requested slots when later slots have not yet been published.
@@ -724,7 +726,7 @@ impl<'a> YCQueue<'a> {
         &mut self,
         num_slots: u16,
     ) -> Result<Vec<YCQueueConsumeSlot<'a>>, YCQueueError> {
-        return self.get_consume_slots_internal(num_slots, true);
+        self.get_consume_slots_internal(num_slots, true)
     }
 
     /// Reserve a single slot for consumption.
@@ -871,8 +873,8 @@ impl<'a> YCQueue<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::YCQueueSharedMeta;
     use crate::YCQueueError;
+    use crate::YCQueueSharedMeta;
     use crate::queue_alloc_helpers::YCQueueOwnedData;
 
     #[test]
