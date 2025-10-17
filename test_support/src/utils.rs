@@ -1,5 +1,10 @@
 // Common utilities for tests
-pub const CACHE_LINE_SIZE: u16 = 64;
+
+use std::sync::atomic::{AtomicU16, Ordering};
+
+use yep_cache_line_size::{get_cache_line_size, CacheType, CacheLevel};
+
+static CACHE_LINE_SIZE: AtomicU16 = AtomicU16::new(0);
 
 pub fn str_to_u8(s: &str) -> &[u8] {
     return s.as_bytes();
@@ -25,5 +30,10 @@ pub fn copy_str_to_slice(s: &str, buf: &mut [u8]) {
 }
 
 pub fn align_to_cache_line(size: u16) -> u16 {
-    ((size + CACHE_LINE_SIZE - 1) / CACHE_LINE_SIZE) * CACHE_LINE_SIZE
+    if CACHE_LINE_SIZE.load(Ordering::Relaxed) == 0 {
+        CACHE_LINE_SIZE.store(get_cache_line_size(CacheLevel::L1, CacheType::Data).unwrap() as u16, Ordering::Relaxed);
+    }
+
+    let cache_line_size = CACHE_LINE_SIZE.load(Ordering::Relaxed);
+    ((size + cache_line_size - 1) / cache_line_size) * cache_line_size
 }
