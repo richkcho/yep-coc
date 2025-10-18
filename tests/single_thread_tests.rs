@@ -127,7 +127,7 @@ mod single_thread_tests {
         // set up the queue
         let mut queue = match YCQueue::new(shared_meta, owned_data.data.as_mut_slice()) {
             Ok(q) => q,
-            Err(e) => panic!("Failed to create queue: err {:?}", e),
+            Err(e) => panic!("Failed to create queue: err {e:?}"),
         };
 
         // reserve the entire queue for produce
@@ -330,7 +330,7 @@ mod single_thread_tests {
         // Produce messages in batches to fill the queue multiple times
         for iter in 0..ITERATIONS {
             for slot_idx in 0..slot_count {
-                let msg = format!("iter_{}_msg_{}", iter, slot_idx);
+                let msg = format!("iter_{iter}_msg_{slot_idx}");
                 all_messages.push(msg.clone());
 
                 let slot = queue.get_produce_slot().unwrap();
@@ -360,8 +360,7 @@ mod single_thread_tests {
             consumed_messages.sort();
             assert_eq!(
                 consumed_messages, expected,
-                "Messages in iteration {} don't match",
-                iter
+                "Messages in iteration {iter} don't match",
             );
         }
 

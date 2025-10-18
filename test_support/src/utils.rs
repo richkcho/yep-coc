@@ -14,7 +14,7 @@ pub fn str_from_u8(buf: &[u8]) -> &str {
     let len = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
     match std::str::from_utf8(&buf[..len]) {
         Ok(s) => s,
-        Err(e) => panic!("couldn't parse as utf-8 string, err: {e} buf: {:?}", buf),
+        Err(e) => panic!("couldn't parse as utf-8 string, err: {e} buf: {buf:?}"),
     }
 }
 
