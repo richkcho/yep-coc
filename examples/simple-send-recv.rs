@@ -45,8 +45,8 @@ fn main() {
     println!("Starting simple send test with:");
     println!("  Queue depth: {}", args.queue_depth);
     println!("  Max in-flight messages: {}", args.in_flight_count);
-    println!("  Message length: {}", msg_len);
-    println!("  Queue slot size: {} bytes", slot_size);
+    println!("  Message length: {msg_len}");
+    println!("  Queue slot size: {slot_size} bytes");
     println!("  Total messages: {}", args.msg_count);
 
     // Validate arguments
@@ -85,7 +85,7 @@ fn main() {
                         let msg = str_from_u8(consume_slot.data);
 
                         if args.verbose {
-                            println!("Received: {}", msg);
+                            println!("Received: {msg}");
                         }
 
                         if args.msg_check_len > 0 {
@@ -94,8 +94,7 @@ fn main() {
                                     [(messages_received as usize + i) % PATTERN.len()];
                                 let received_char = msg.as_bytes()[i];
                                 if expected_char != received_char {
-                                    panic!("Message content mismatch at message {}, byte {}:\nExpected: '{}'\nReceived: '{}'", 
-                                          messages_received, i, expected_char, received_char);
+                                    panic!("Message content mismatch at message {messages_received}, byte {i}:\nExpected: '{expected_char}'\nReceived: '{received_char}'");
                                 }
                             }
                         }
@@ -106,12 +105,12 @@ fn main() {
                     Err(YCQueueError::EmptyQueue) | Err(YCQueueError::SlotNotReady) => {
                         thread::yield_now(); // Queue is empty, yield CPU
                     }
-                    Err(e) => panic!("Consumer error: {:?}", e),
+                    Err(e) => panic!("Consumer error: {e:?}"),
                 }
             }
 
             end_time = std::time::Instant::now();
-            println!("Consumer finished after receiving {} messages", messages_received);
+            println!("Consumer finished after receiving {messages_received} messages");
         });
 
         // Producer thread
@@ -148,10 +147,10 @@ fn main() {
                     Err(YCQueueError::OutOfSpace) | Err(YCQueueError::SlotNotReady) => {
                         thread::yield_now(); // Queue is full, yield CPU
                     }
-                    Err(e) => panic!("Producer error: {:?}", e),
+                    Err(e) => panic!("Producer error: {e:?}"),
                 }
             }
-            println!("Producer finished after sending {} messages", messages_sent);
+            println!("Producer finished after sending {messages_sent} messages");
         });
     });
 

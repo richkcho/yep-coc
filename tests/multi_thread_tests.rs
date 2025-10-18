@@ -38,7 +38,7 @@ mod multi_thread_tests {
                 while counter < slot_count * num_iterations {
                     match consume_queue.get_consume_slot() {
                         Ok(consume_slot) => {
-                            let expected_str = format!("hello-{}", counter);
+                            let expected_str = format!("hello-{counter}");
                             let actual_str = str_from_u8(consume_slot.data);
                             assert_eq!(
                                 expected_str, actual_str,
@@ -52,7 +52,7 @@ mod multi_thread_tests {
                             std::thread::yield_now();
                         }
                         Err(e) => {
-                            panic!("unexpected error when consuming: {:?}", e);
+                            panic!("unexpected error when consuming: {e:?}");
                         }
                     }
                 }
@@ -65,7 +65,7 @@ mod multi_thread_tests {
                 while counter < slot_count * num_iterations {
                     match produce_queue.get_produce_slot() {
                         Ok(produce_slot) => {
-                            let produce_str = format!("hello-{}", counter);
+                            let produce_str = format!("hello-{counter}");
                             copy_str_to_slice(&produce_str, &mut *produce_slot.data);
                             produce_queue.mark_slot_produced(produce_slot).unwrap();
                             counter += 1;
@@ -75,7 +75,7 @@ mod multi_thread_tests {
                             std::thread::yield_now();
                         }
                         Err(e) => {
-                            panic!("unexpected error when producing: {:?}", e);
+                            panic!("unexpected error when producing: {e:?}");
                         }
                     }
                 }
@@ -119,7 +119,7 @@ mod multi_thread_tests {
                         Err(YCQueueError::EmptyQueue) | Err(YCQueueError::SlotNotReady) => {
                             match consume_queue.get_consume_slot() {
                                 Ok(slot) => {
-                                    let expected = format!("hello-{}", next_expected);
+                                    let expected = format!("hello-{next_expected}");
                                     assert_eq!(str_from_u8(slot.data), expected);
                                     consume_queue.mark_slot_consumed(slot).unwrap();
                                     next_expected += 1;
@@ -127,10 +127,10 @@ mod multi_thread_tests {
                                 Err(YCQueueError::EmptyQueue) | Err(YCQueueError::SlotNotReady) => {
                                     std::thread::yield_now();
                                 }
-                                Err(e) => panic!("unexpected error batching consume: {:?}", e),
+                                Err(e) => panic!("unexpected error batching consume: {e:?}"),
                             }
                         }
-                        Err(e) => panic!("unexpected error consuming batched slots: {:?}", e),
+                        Err(e) => panic!("unexpected error consuming batched slots: {e:?}"),
                     }
                 }
             });
@@ -153,7 +153,7 @@ mod multi_thread_tests {
                         Err(YCQueueError::OutOfSpace) | Err(YCQueueError::SlotNotReady) => {
                             match produce_queue.get_produce_slot() {
                                 Ok(slot) => {
-                                    let msg = format!("hello-{}", next_to_send);
+                                    let msg = format!("hello-{next_to_send}");
                                     copy_str_to_slice(&msg, &mut *slot.data);
                                     produce_queue.mark_slot_produced(slot).unwrap();
                                     next_to_send += 1;
@@ -161,10 +161,10 @@ mod multi_thread_tests {
                                 Err(YCQueueError::OutOfSpace) | Err(YCQueueError::SlotNotReady) => {
                                     std::thread::yield_now()
                                 }
-                                Err(e) => panic!("unexpected error batching produce: {:?}", e),
+                                Err(e) => panic!("unexpected error batching produce: {e:?}"),
                             }
                         }
-                        Err(e) => panic!("unexpected error producing batched slots: {:?}", e),
+                        Err(e) => panic!("unexpected error producing batched slots: {e:?}"),
                     }
                 }
             });
@@ -212,7 +212,7 @@ mod multi_thread_tests {
         std::thread::scope(|s| {
             // start consumers
             for i in 0..num_consumers {
-                let builder = std::thread::Builder::new().name(format!("consumer_{}", i));
+                let builder = std::thread::Builder::new().name(format!("consumer_{i}"));
                 let mut consume_queue = consumer_queues.pop().unwrap();
                 let received_ids = Arc::clone(&received_ids);
                 builder
@@ -223,22 +223,19 @@ mod multi_thread_tests {
                                     let message = str_from_u8(consume_slot.data);
                                     let id_str = message
                                         .strip_prefix("hello-")
-                                        .unwrap_or_else(|| panic!("bad message: {}", message));
+                                        .unwrap_or_else(|| panic!("bad message: {message}"));
                                     let id: u32 = id_str
                                         .parse()
-                                        .unwrap_or_else(|_| panic!("bad message: {}", message));
+                                        .unwrap_or_else(|_| panic!("bad message: {message}"));
                                     assert!(
                                         id < max_messages,
-                                        "received id out of range: {}, message: {}, slot: {}",
-                                        id,
-                                        message,
+                                        "received id out of range: {id}, message: {message}, slot: {}",
                                         consume_slot.index
                                     );
                                     // we should only ever insert unique values
                                     assert!(
                                         received_ids.lock().unwrap().insert(id),
-                                        "duplicate message received: {}",
-                                        message
+                                        "duplicate message received: {message}",
                                     );
 
                                     // poison the block after consuming the message to help catch bugs
@@ -252,12 +249,12 @@ mod multi_thread_tests {
                                     std::thread::yield_now();
                                 }
                                 Err(e) => {
-                                    panic!("unexpected error when consuming: {:?}", e);
+                                panic!("unexpected error when consuming: {e:?}");
                                 }
                             }
 
                             if std::time::Instant::now() > deadline {
-                                panic!("test timed out after {:?}", timeout);
+                                panic!("test timed out after {timeout:?}");
                             }
                         }
                     })
@@ -266,7 +263,7 @@ mod multi_thread_tests {
 
             // start producers
             for i in 0..num_producers {
-                let builder = std::thread::Builder::new().name(format!("producer_{}", i));
+                let builder = std::thread::Builder::new().name(format!("producer_{i}"));
                 let sent_ids = Arc::clone(&sent_ids);
                 let mut produce_queue = producer_queues.pop().unwrap();
                 let counter = Arc::clone(&produce_counter);
@@ -276,14 +273,13 @@ mod multi_thread_tests {
                         while id < max_messages {
                             match produce_queue.get_produce_slot() {
                                 Ok(produce_slot) => {
-                                    let produce_str = format!("hello-{}", id);
+                                    let produce_str = format!("hello-{id}");
                                     copy_str_to_slice(&produce_str, &mut *produce_slot.data);
                                     produce_queue.mark_slot_produced(produce_slot).unwrap();
 
                                     assert!(
                                         sent_ids.lock().unwrap().insert(id),
-                                        "duplicate message sent: {}",
-                                        produce_str
+                                        "duplicate message sent: {produce_str}",
                                     );
                                     id = counter.fetch_add(1, Ordering::AcqRel);
                                 }
@@ -292,12 +288,12 @@ mod multi_thread_tests {
                                     std::thread::yield_now();
                                 }
                                 Err(e) => {
-                                    panic!("unexpected error when producing: {:?}", e);
+                                    panic!("unexpected error when producing: {e:?}");
                                 }
                             }
 
                             if std::time::Instant::now() > deadline {
-                                panic!("test timed out after {:?}", timeout);
+                                panic!("test timed out after {timeout:?}");
                             }
                         }
                     })
@@ -315,8 +311,7 @@ mod multi_thread_tests {
         for i in 0..max_messages {
             assert!(
                 sent_ids.lock().unwrap().contains(&i),
-                "missing sent id: {}",
-                i
+                "missing sent id: {i}",
             );
         }
 
@@ -327,9 +322,7 @@ mod multi_thread_tests {
         for i in 0..max_messages {
             assert!(
                 received_ids.contains(&i),
-                "missing received id: {}, ids: {:?}",
-                i,
-                received_ids
+                "missing received id: {i}, ids: {received_ids:?}",
             );
         }
     }
@@ -368,7 +361,7 @@ mod multi_thread_tests {
 
         std::thread::scope(|s| {
             for i in 0..num_consumers {
-                let builder = std::thread::Builder::new().name(format!("batched_consumer_{}", i));
+                let builder = std::thread::Builder::new().name(format!("batched_consumer_{i}"));
                 let received_ids = Arc::clone(&received_ids);
                 let mut consume_queue = consumer_queues.pop().unwrap();
                 builder
@@ -396,15 +389,14 @@ mod multi_thread_tests {
                                         let message = str_from_u8(slot.data);
                                         let id_str = message
                                             .strip_prefix("hello-")
-                                            .unwrap_or_else(|| panic!("bad message: {}", message));
+                                            .unwrap_or_else(|| panic!("bad message: {message}"));
                                         let id: u32 = id_str
                                             .parse()
-                                            .unwrap_or_else(|_| panic!("bad message: {}", message));
-                                        assert!(id < max_messages, "id {} out of range", id);
+                                            .unwrap_or_else(|_| panic!("bad message: {message}"));
+                                        assert!(id < max_messages, "id {id} out of range");
                                         assert!(
                                             received_ids.lock().unwrap().insert(id),
-                                            "duplicate message received: {}",
-                                            id
+                                            "duplicate message received: {id}",
                                         );
                                     }
                                     consume_queue.mark_slots_consumed(slots).unwrap();
@@ -415,16 +407,15 @@ mod multi_thread_tests {
                                             let message = str_from_u8(slot.data);
                                             let id_str =
                                                 message.strip_prefix("hello-").unwrap_or_else(
-                                                    || panic!("bad message: {}", message),
+                                                    || panic!("bad message: {message}"),
                                                 );
                                             let id: u32 = id_str.parse().unwrap_or_else(|_| {
-                                                panic!("bad message: {}", message)
+                                                panic!("bad message: {message}")
                                             });
-                                            assert!(id < max_messages, "id {} out of range", id);
+                                            assert!(id < max_messages, "id {id} out of range");
                                             assert!(
                                                 received_ids.lock().unwrap().insert(id),
-                                                "duplicate message received: {}",
-                                                id
+                                                "duplicate message received: {id}",
                                             );
                                             consume_queue.mark_slot_consumed(slot).unwrap();
                                         }
@@ -432,16 +423,16 @@ mod multi_thread_tests {
                                         | Err(YCQueueError::SlotNotReady) => {
                                             std::thread::yield_now()
                                         }
-                                        Err(e) => panic!("unexpected error consuming: {:?}", e),
+                                        Err(e) => panic!("unexpected error consuming: {e:?}"),
                                     }
                                 }
                                 Err(e) => {
-                                    panic!("unexpected error consuming batched slots: {:?}", e)
+                                    panic!("unexpected error consuming batched slots: {e:?}")
                                 }
                             }
 
                             if std::time::Instant::now() > deadline {
-                                panic!("batched consumer timed out after {:?}", timeout);
+                                panic!("batched consumer timed out after {timeout:?}");
                             }
                         }
                     })
@@ -449,7 +440,7 @@ mod multi_thread_tests {
             }
 
             for i in 0..num_producers {
-                let builder = std::thread::Builder::new().name(format!("batched_producer_{}", i));
+                let builder = std::thread::Builder::new().name(format!("batched_producer_{i}"));
                 let sent_ids = Arc::clone(&sent_ids);
                 let mut produce_queue = producer_queues.pop().unwrap();
                 let counter = Arc::clone(&produce_counter);
@@ -470,12 +461,11 @@ mod multi_thread_tests {
                                     Ok(mut slots) => {
                                         for (offset, slot) in slots.iter_mut().enumerate() {
                                             let id = chunk_start + offset as u32;
-                                            let produce_str = format!("hello-{}", id);
+                                            let produce_str = format!("hello-{id}");
                                             copy_str_to_slice(&produce_str, &mut *slot.data);
                                             assert!(
                                                 sent_ids.lock().unwrap().insert(id),
-                                                "duplicate message sent: {}",
-                                                id
+                                                "duplicate message sent: {id}",
                                             );
                                         }
                                         produce_queue.mark_slots_produced(slots).unwrap();
@@ -486,12 +476,12 @@ mod multi_thread_tests {
                                         std::thread::yield_now();
                                     }
                                     Err(e) => {
-                                        panic!("unexpected error producing batched slots: {:?}", e);
+                                        panic!("unexpected error producing batched slots: {e:?}");
                                     }
                                 }
 
                                 if std::time::Instant::now() > deadline {
-                                    panic!("batched producer timed out after {:?}", timeout);
+                                    panic!("batched producer timed out after {timeout:?}");
                                 }
                             }
                         }
@@ -507,13 +497,11 @@ mod multi_thread_tests {
         for id in 0..max_messages {
             assert!(
                 sent_ids.lock().unwrap().contains(&id),
-                "missing sent id {}",
-                id
+                "missing sent id {id}",
             );
             assert!(
                 received_ids.lock().unwrap().contains(&id),
-                "missing received id {}",
-                id
+                "missing received id {id}",
             );
         }
     }

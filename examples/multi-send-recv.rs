@@ -57,22 +57,21 @@ fn warn_for_thread_counts(args: &Args) {
 
     if total_threads > available_cpus {
         eprintln!(
-            "Warning: total thread count ({}) exceeds available CPUs ({})",
-            total_threads, available_cpus
+            "Warning: total thread count ({total_threads}) exceeds available CPUs ({available_cpus})",
         );
     }
 
     if args.producer_threads as usize > available_cpus {
         eprintln!(
-            "Warning: producer thread count ({}) exceeds available CPUs ({})",
-            args.producer_threads, available_cpus
+            "Warning: producer thread count ({}) exceeds available CPUs ({available_cpus})",
+            args.producer_threads
         );
     }
 
     if args.consumer_threads as usize > available_cpus {
         eprintln!(
-            "Warning: consumer thread count ({}) exceeds available CPUs ({})",
-            args.consumer_threads, available_cpus
+            "Warning: consumer thread count ({}) exceeds available CPUs ({available_cpus})",
+            args.consumer_threads
         );
     }
 }
@@ -100,8 +99,8 @@ fn main() {
     println!("Starting multi-send-recv test with:");
     println!("  Queue depth: {}", args.queue_depth);
     println!("  Max in-flight messages: {}", args.in_flight_count);
-    println!("  Message length: {}", msg_len);
-    println!("  Queue slot size: {} bytes", slot_size);
+    println!("  Message length: {msg_len}");
+    println!("  Queue slot size: {slot_size} bytes");
     println!("  Total messages: {}", args.msg_count);
     println!("  Producer threads: {}", args.producer_threads);
     println!("  Consumer threads: {}", args.consumer_threads);
@@ -192,7 +191,7 @@ fn main() {
                                 }
 
                                 if verbose {
-                                    println!("Producer thread sent message {}", msg_index);
+                                    println!("Producer thread sent message {msg_index}");
                                 }
 
                                 queue.mark_slot_produced(slot).unwrap();
@@ -202,7 +201,7 @@ fn main() {
                             Err(YCQueueError::OutOfSpace) | Err(YCQueueError::SlotNotReady) => {
                                 thread::yield_now();
                             }
-                            Err(e) => panic!("Producer error: {:?}", e),
+                            Err(e) => panic!("Producer error: {e:?}"),
                         }
                     }
                 }
@@ -223,10 +222,7 @@ fn main() {
                 }
 
                 if verbose {
-                    println!(
-                        "Producer thread finished after sending {} messages",
-                        local_sent
-                    );
+                    println!("Producer thread finished after sending {local_sent} messages",);
                 }
             });
         }
@@ -263,15 +259,12 @@ fn main() {
                             if msg_check_len > 0 {
                                 local_validations.push(slot.data[..validation_len].to_vec());
                                 if verbose {
-                                    println!("Consumer thread received message {}", msg_index);
+                                    println!("Consumer thread received message {msg_index}");
                                 }
                             } else {
                                 let msg = str_from_u8(slot.data);
                                 if verbose {
-                                    println!(
-                                        "Consumer thread received message {}: {}",
-                                        msg_index, msg
-                                    );
+                                    println!("Consumer thread received message {msg_index}: {msg}");
                                 }
                             }
 
@@ -281,15 +274,12 @@ fn main() {
                         Err(YCQueueError::EmptyQueue) | Err(YCQueueError::SlotNotReady) => {
                             thread::yield_now();
                         }
-                        Err(e) => panic!("Consumer error: {:?}", e),
+                        Err(e) => panic!("Consumer error: {e:?}"),
                     }
                 }
 
                 if verbose {
-                    println!(
-                        "Consumer thread finished after receiving {} messages",
-                        local_received
-                    );
+                    println!("Consumer thread finished after receiving {local_received} messages");
                 }
 
                 let thread_end = std::time::Instant::now();
@@ -356,14 +346,11 @@ fn main() {
         let index = u32::from_le_bytes(index_bytes);
 
         if index >= args.msg_count {
-            panic!("Received message index {} out of expected range", index);
+            panic!("Received message index {index} out of expected range");
         }
 
         if seen[index as usize] {
-            panic!(
-                "Duplicate message index {} detected during validation",
-                index
-            );
+            panic!("Duplicate message index {index} detected during validation");
         }
         seen[index as usize] = true;
 
@@ -374,8 +361,7 @@ fn main() {
             let expected = PATTERN.as_bytes()[(index as usize + offset) % PATTERN.len()];
             if byte != expected {
                 panic!(
-                    "Message content mismatch at message {}, byte {}:\nExpected: '{}'\nReceived: '{}'",
-                    index, offset, expected, byte
+                    "Message content mismatch at message {index}, byte {offset}:\nExpected: '{expected}'\nReceived: '{byte}'",
                 );
             }
         }

@@ -363,7 +363,7 @@ impl<'a> YCQueue<'a> {
             let slot_data = self.slots[index as usize].replace(None);
             match slot_data {
                 Some(data) => slots.push(YCQueueProduceSlot { index, data }),
-                None => panic!("We double-loaned out produce index {:?}", index),
+                None => panic!("We double-loaned out produce index {index:?}"),
             }
 
             index += 1;
@@ -642,7 +642,7 @@ impl<'a> YCQueue<'a> {
             let slot_data = self.slots[index as usize].replace(None);
             match slot_data {
                 Some(data) => slots.push(YCQueueConsumeSlot { index, data }),
-                None => panic!("We double-loaned out consume index {:?}", index),
+                None => panic!("We double-loaned out consume index {index:?}"),
             }
 
             index += 1;
