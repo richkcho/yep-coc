@@ -166,9 +166,46 @@ mod queue_alloc_helpers_tests {
         }
         for i in 0..num_atomics {
             assert_eq!(
-                new_new_value + (i as u64) as u64,
+                new_new_value + (i as u64),
                 owned_meta.ownership[i].load(Ordering::Acquire)
             );
         }
+    }
+
+    #[test]
+    fn test_shared_data() {
+        let slot_count: u16 = 4;
+        let slot_size: u16 = 8;
+        let mut owned_data = YCQueueOwnedData::new(slot_count, slot_size);
+
+        for (idx, byte) in owned_data.data.iter_mut().enumerate() {
+            *byte = idx as u8;
+        }
+
+        let data_len = owned_data.data.len();
+
+        // mutate using transient shared data
+        {
+            let shared = YCQueueSharedData::from_owned_data(&owned_data);
+            let data = shared.data;
+            assert_eq!(data, owned_data.data.as_slice());
+
+            data[0] = 0xAA;
+            data[data_len - 1] = 0xBB;
+        }
+
+        // check is OK
+        assert_eq!(owned_data.data[0], 0xAA);
+        assert_eq!(owned_data.data[data_len - 1], 0xBB);
+
+        owned_data.data[1] = 0xCC;
+        let mid = data_len / 2;
+        owned_data.data[mid] = 0xDD;
+
+        // should show up in shared data
+        let shared = YCQueueSharedData::from_owned_data(&owned_data);
+        let data = shared.data;
+        assert_eq!(data[1], 0xCC);
+        assert_eq!(data[mid], 0xDD);
     }
 }
