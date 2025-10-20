@@ -58,7 +58,7 @@ mod tests {
     use super::YCQueueU64Meta;
 
     #[test]
-    fn test_produce_meta() {
+    fn test_u64_meta() {
         let mut meta: YCQueueU64Meta = YCQueueU64Meta::from_u64(0);
 
         assert_eq!(meta.produce_idx, 0);
