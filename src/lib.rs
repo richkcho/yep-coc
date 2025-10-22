@@ -5,6 +5,12 @@ pub use queue::YCQueueConsumeSlot;
 pub use queue::YCQueueOwner;
 pub use queue::YCQueueProduceSlot;
 
+/// Futex-backed helpers (optional feature)
+#[cfg(feature = "futex")]
+pub mod futex_queue;
+#[cfg(feature = "futex")]
+pub use futex_queue::YCFutexQueue;
+
 /// dependencies for the circular queue code
 pub mod queue_meta;
 pub use queue_meta::YCQueueSharedMeta;

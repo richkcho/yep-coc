@@ -299,6 +299,12 @@ impl<'a> YCQueue<'a> {
         self.get_u64_meta().consume_idx
     }
 
+    /// Returns the total number of slots managed by this queue.
+    #[inline]
+    pub fn capacity(&self) -> u16 {
+        self.slot_count
+    }
+
     /// Core implementation for producer slot reservation.
     ///
     /// When `best_effort` is `false`, the function succeeds only if all `num_slots` are available;
@@ -874,7 +880,6 @@ impl<'a> YCQueue<'a> {
 mod tests {
     use super::*;
     use crate::YCQueueError;
-    use crate::YCQueueSharedMeta;
     use crate::queue_alloc_helpers::YCQueueOwnedData;
 
     #[test]
@@ -882,9 +887,8 @@ mod tests {
         let slot_count: u16 = 4;
         let slot_size: u16 = 32;
 
-        let mut owned = YCQueueOwnedData::new(slot_count, slot_size);
-        let shared_meta = YCQueueSharedMeta::new(&owned.meta);
-        let mut queue = YCQueue::new(shared_meta, owned.data.as_mut_slice()).unwrap();
+        let owned = YCQueueOwnedData::new(slot_count, slot_size);
+        let mut queue = YCQueue::from_owned_data(&owned).unwrap();
 
         assert_eq!(
             queue.check_owner(0, slot_count, YCQueueOwner::Producer),
@@ -926,9 +930,8 @@ mod tests {
         let slot_count: u16 = 8;
         let slot_size: u16 = 64;
 
-        let mut owned = YCQueueOwnedData::new(slot_count, slot_size);
-        let shared_meta = YCQueueSharedMeta::new(&owned.meta);
-        let mut queue = YCQueue::new(shared_meta, owned.data.as_mut_slice()).unwrap();
+        let owned = YCQueueOwnedData::new(slot_count, slot_size);
+        let mut queue = YCQueue::from_owned_data(&owned).unwrap();
 
         assert_eq!(
             queue.check_owner(0, slot_count, YCQueueOwner::Producer),
@@ -989,9 +992,8 @@ mod tests {
         let slot_count: u16 = 4;
         let slot_size: u16 = 32;
 
-        let mut owned = YCQueueOwnedData::new(slot_count, slot_size);
-        let shared_meta = YCQueueSharedMeta::new(&owned.meta);
-        let mut queue = YCQueue::new(shared_meta, owned.data.as_mut_slice()).unwrap();
+        let owned = YCQueueOwnedData::new(slot_count, slot_size);
+        let mut queue = YCQueue::from_owned_data(&owned).unwrap();
 
         // Publish three slots so the consumer can hold one and block the wrap-around slot.
         let produce_slots = queue.get_produce_slots(3).unwrap();
@@ -1024,9 +1026,8 @@ mod tests {
         let slot_count: u16 = 4;
         let slot_size: u16 = 32;
 
-        let mut owned = YCQueueOwnedData::new(slot_count, slot_size);
-        let shared_meta = YCQueueSharedMeta::new(&owned.meta);
-        let mut queue = YCQueue::new(shared_meta, owned.data.as_mut_slice()).unwrap();
+        let owned = YCQueueOwnedData::new(slot_count, slot_size);
+        let mut queue = YCQueue::from_owned_data(&owned).unwrap();
 
         let mut produce = queue.get_produce_slots(2).unwrap();
         let first_ready = produce.remove(0);
@@ -1061,9 +1062,8 @@ mod tests {
         let slot_count: u16 = 4;
         let slot_size: u16 = 32;
 
-        let mut owned = YCQueueOwnedData::new(slot_count, slot_size);
-        let shared_meta = YCQueueSharedMeta::new(&owned.meta);
-        let mut queue = YCQueue::new(shared_meta, owned.data.as_mut_slice()).unwrap();
+        let owned = YCQueueOwnedData::new(slot_count, slot_size);
+        let mut queue = YCQueue::from_owned_data(&owned).unwrap();
 
         let initial_slots = queue.get_produce_slots(slot_count).unwrap();
         assert_eq!(queue.in_flight_count(), slot_count);

@@ -1,6 +1,12 @@
-use std::sync::atomic::{AtomicU16, AtomicU64};
+cfg_if::cfg_if! {
+    if #[cfg(feature = "futex")] {
+        use std::sync::atomic::AtomicU32;
+        use crate::YCFutexQueue;
+    }
+}
 
-use crate::{YCQueueError, YCQueueSharedMeta};
+use crate::{YCQueue, YCQueueError, YCQueueSharedMeta};
+use std::sync::atomic::{AtomicU16, AtomicU64};
 
 #[derive(Debug)]
 pub struct YCQueueOwnedMeta {
@@ -70,7 +76,7 @@ impl<'a> YCQueueSharedMeta<'a> {
     }
 }
 
-/// A way to hold a YCQueueSharedMeta to share between threads of a particular rust program. Not designed for IPC.
+/// A way to hold a YCQueueSharedMeta to share between threads of a particular rust program.
 #[derive(Debug)]
 pub struct YCQueueOwnedData {
     pub meta: YCQueueOwnedMeta,
@@ -116,6 +122,76 @@ impl<'a> YCQueueSharedData<'a> {
             meta,
             data: unsafe { std::slice::from_raw_parts_mut(data, owned.data.len()) },
         }
+    }
+}
+
+impl<'a> YCQueue<'a> {
+    pub fn from_owned_data(owned: &'a YCQueueOwnedData) -> Result<YCQueue<'a>, YCQueueError> {
+        let shared_view = YCQueueSharedData::from_owned_data(owned);
+        YCQueue::new(shared_view.meta, shared_view.data)
+    }
+
+    pub fn from_shared_data(shared: YCQueueSharedData<'a>) -> Result<YCQueue<'a>, YCQueueError> {
+        YCQueue::new(shared.meta, shared.data)
+    }
+}
+
+#[cfg(feature = "futex")]
+#[derive(Debug)]
+pub struct YCFutexQueueOwnedData {
+    pub data: YCQueueOwnedData,
+    pub count: AtomicU32,
+}
+
+#[cfg(feature = "futex")]
+impl YCFutexQueueOwnedData {
+    pub fn new(slot_count_u16: u16, slot_size_u16: u16) -> YCFutexQueueOwnedData {
+        let data = YCQueueOwnedData::new(slot_count_u16, slot_size_u16);
+        let count = AtomicU32::new(0);
+
+        YCFutexQueueOwnedData { data, count }
+    }
+}
+
+#[cfg(feature = "futex")]
+#[derive(Debug)]
+pub struct YCFutexQueueSharedData<'a> {
+    pub data: YCQueueSharedData<'a>,
+    pub count: &'a AtomicU32,
+}
+
+#[cfg(feature = "futex")]
+impl<'a> YCFutexQueueSharedData<'a> {
+    pub fn from_owned_data(futex_queue: &'a YCFutexQueueOwnedData) -> YCFutexQueueSharedData<'a> {
+        let data = YCQueueSharedData::from_owned_data(&futex_queue.data);
+        let count = &futex_queue.count;
+
+        YCFutexQueueSharedData { data, count }
+    }
+}
+
+#[cfg(feature = "futex")]
+impl<'a> YCFutexQueue<'a> {
+    pub fn from_shared_data(
+        shared: YCFutexQueueSharedData<'a>,
+    ) -> Result<YCFutexQueue<'a>, YCQueueError> {
+        let queue = YCQueue::new(shared.data.meta, shared.data.data)?;
+
+        Ok(YCFutexQueue {
+            queue,
+            count: shared.count,
+        })
+    }
+
+    pub fn from_owned_data(
+        owned: &'a YCFutexQueueOwnedData,
+    ) -> Result<YCFutexQueue<'a>, YCQueueError> {
+        let queue = YCQueue::from_owned_data(&owned.data)?;
+
+        Ok(YCFutexQueue {
+            queue,
+            count: &owned.count,
+        })
     }
 }
 
@@ -207,5 +283,52 @@ mod queue_alloc_helpers_tests {
         let data = shared.data;
         assert_eq!(data[1], 0xCC);
         assert_eq!(data[mid], 0xDD);
+    }
+
+    #[cfg(feature = "futex")]
+    #[test]
+    fn test_futex_shared_queue_and_counter() {
+        let slot_count: u16 = 4;
+        let slot_size: u16 = 16;
+
+        let mut owned = YCFutexQueueOwnedData::new(slot_count, slot_size);
+
+        // Seed underlying queue data through owned handle.
+        for (idx, byte) in owned.data.data.iter_mut().enumerate() {
+            *byte = idx as u8;
+        }
+
+        let data_len = owned.data.data.len();
+        {
+            let shared = YCFutexQueueSharedData::from_owned_data(&owned);
+            let data = shared.data.data;
+            assert_eq!(data, owned.data.data.as_slice());
+
+            // Mutate through the shared handle and ensure the owned buffer sees it.
+            data[0] = 0xAA;
+            data[data.len() - 1] = 0xBB;
+        }
+        assert_eq!(owned.data.data[0], 0xAA);
+        assert_eq!(owned.data.data[data_len - 1], 0xBB);
+
+        // Mutate through owned handle and verify the shared slice reflects changes.
+        owned.data.data[1] = 0xCC;
+        owned.data.data[data_len / 2] = 0xDD;
+        {
+            let shared_again = YCFutexQueueSharedData::from_owned_data(&owned);
+            let data_again = shared_again.data.data;
+            assert_eq!(data_again[1], 0xCC);
+            assert_eq!(data_again[data_again.len() / 2], 0xDD);
+        }
+
+        // Verify the atomic counter is shared.
+        owned.count.store(123, Ordering::Release);
+        {
+            let shared = YCFutexQueueSharedData::from_owned_data(&owned);
+            assert_eq!(shared.count.load(Ordering::Acquire), 123);
+
+            shared.count.store(77, Ordering::Release);
+        }
+        assert_eq!(owned.count.load(Ordering::Acquire), 77);
     }
 }
