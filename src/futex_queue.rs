@@ -21,6 +21,32 @@ pub struct YCFutexQueue<'a> {
 
 impl<'a> YCFutexQueue<'a> {
     /// Wrap a queue together with a shared produced-counter.
+    ///
+    /// # Arguments
+    /// * `queue` - The underlying `YCQueue` that will provide slot storage.
+    /// * `count` - Shared atomic counter tracking the number of published slots.
+    ///
+    /// # Returns
+    /// A futex-backed queue wrapper that can block producers and consumers efficiently.
+    ///
+    /// # Errors
+    /// This constructor does not return errors.
+    ///
+    /// # Examples
+    /// ```
+    /// # #[cfg(feature = "futex")] {
+    /// use std::sync::atomic::Ordering;
+    /// use yep_coc::queue_alloc_helpers::{YCFutexQueueOwnedData, YCFutexQueueSharedData};
+    /// use yep_coc::{YCQueue, YCFutexQueue};
+    ///
+    /// let owned = YCFutexQueueOwnedData::new(2, 16);
+    /// let shared = YCFutexQueueSharedData::from_owned_data(&owned);
+    /// let queue = YCQueue::new(shared.data.meta, shared.data.data).unwrap();
+    /// let futex = YCFutexQueue::new(queue, shared.count);
+    ///
+    /// assert_eq!(futex.count.load(Ordering::Relaxed), 0);
+    /// # }
+    /// ```
     pub fn new(queue: YCQueue<'a>, count: &'a AtomicU32) -> Self {
         YCFutexQueue { queue, count }
     }
@@ -33,6 +59,31 @@ impl<'a> YCFutexQueue<'a> {
     ///   is smaller than `num_slots`.
     /// * `timeout` - Maximum time to wait for space before returning `YCQueueError::Timeout`.
     /// * `retry_interval` - Minimum delay between retries when the queue is not ready yet.
+    ///
+    /// # Returns
+    /// `Ok` with one or more slots reserved for production.
+    ///
+    /// # Errors
+    /// Returns `YCQueueError::InvalidArgs`, `YCQueueError::OutOfSpace`, `YCQueueError::SlotNotReady`,
+    /// or `YCQueueError::Timeout` depending on the underlying queue state.
+    ///
+    /// # Examples
+    /// ```
+    /// # #[cfg(feature = "futex")] {
+    /// use std::time::Duration;
+    /// use yep_coc::queue_alloc_helpers::YCFutexQueueOwnedData;
+    /// use yep_coc::YCFutexQueue;
+    ///
+    /// let owned = YCFutexQueueOwnedData::new(4, 32);
+    /// let mut queue = YCFutexQueue::from_owned_data(&owned).unwrap();
+    ///
+    /// let timeout = Duration::from_millis(1);
+    /// let slots = queue
+    ///     .get_produce_slots(2, false, timeout, Duration::ZERO)
+    ///     .unwrap();
+    /// queue.mark_slots_produced(slots).unwrap();
+    /// # }
+    /// ```
     pub fn get_produce_slots(
         &mut self,
         num_slots: u16,
@@ -65,6 +116,38 @@ impl<'a> YCFutexQueue<'a> {
         }
     }
 
+    /// Reserve a single slot for production, blocking up to `timeout`.
+    ///
+    /// This is equivalent to calling [`get_produce_slots`](Self::get_produce_slots) with
+    /// `num_slots == 1` and `best_effort == false`.
+    ///
+    /// # Arguments
+    /// * `timeout` - Maximum time to wait before giving up with `YCQueueError::Timeout`.
+    /// * `retry_interval` - Minimum delay between retries when capacity is not yet available.
+    ///
+    /// # Returns
+    /// `Ok` with the next available `YCQueueProduceSlot`.
+    ///
+    /// # Errors
+    /// Propagates the same errors as [`get_produce_slots`](Self::get_produce_slots).
+    ///
+    /// # Examples
+    /// ```
+    /// # #[cfg(feature = "futex")] {
+    /// use std::time::Duration;
+    /// use yep_coc::queue_alloc_helpers::YCFutexQueueOwnedData;
+    /// use yep_coc::YCFutexQueue;
+    ///
+    /// let owned = YCFutexQueueOwnedData::new(2, 32);
+    /// let mut queue = YCFutexQueue::from_owned_data(&owned).unwrap();
+    ///
+    /// let timeout = Duration::from_millis(1);
+    /// let slot = queue
+    ///     .get_produce_slot(timeout, Duration::ZERO)
+    ///     .unwrap();
+    /// queue.mark_slot_produced(slot).unwrap();
+    /// # }
+    /// ```
     pub fn get_produce_slot(
         &mut self,
         timeout: Duration,
@@ -85,6 +168,35 @@ impl<'a> YCFutexQueue<'a> {
     ///   smaller than `num_slots`.
     /// * `timeout` - Maximum time to wait for data before returning `YCQueueError::Timeout`.
     /// * `retry_interval` - Minimum delay between retries when no slots are currently ready.
+    ///
+    /// # Returns
+    /// `Ok` with one or more contiguous slots available for consumption.
+    ///
+    /// # Errors
+    /// Returns `YCQueueError::InvalidArgs`, `YCQueueError::EmptyQueue`, `YCQueueError::SlotNotReady`,
+    /// or `YCQueueError::Timeout` when the requested slots cannot be obtained.
+    ///
+    /// # Examples
+    /// ```
+    /// # #[cfg(feature = "futex")] {
+    /// use std::time::Duration;
+    /// use yep_coc::queue_alloc_helpers::YCFutexQueueOwnedData;
+    /// use yep_coc::YCFutexQueue;
+    ///
+    /// let owned = YCFutexQueueOwnedData::new(4, 32);
+    /// let mut queue = YCFutexQueue::from_owned_data(&owned).unwrap();
+    /// let timeout = Duration::from_millis(1);
+    /// let slots = queue
+    ///     .get_produce_slots(2, false, timeout, Duration::ZERO)
+    ///     .unwrap();
+    /// queue.mark_slots_produced(slots).unwrap();
+    ///
+    /// let ready = queue
+    ///     .get_consume_slots(2, false, timeout, Duration::ZERO)
+    ///     .unwrap();
+    /// queue.mark_slots_consumed(ready).unwrap();
+    /// # }
+    /// ```
     pub fn get_consume_slots(
         &mut self,
         num_slots: u16,
@@ -122,6 +234,43 @@ impl<'a> YCFutexQueue<'a> {
         }
     }
 
+    /// Reserve a single slot for consumption, blocking up to `timeout`.
+    ///
+    /// This is equivalent to calling [`get_consume_slots`](Self::get_consume_slots) with
+    /// `num_slots == 1` and `best_effort == false`.
+    ///
+    /// # Arguments
+    /// * `timeout` - Maximum time to wait before giving up with `YCQueueError::Timeout`.
+    /// * `retry_interval` - Minimum delay between retries when no slots are yet published.
+    ///
+    /// # Returns
+    /// `Ok` with the next ready `YCQueueConsumeSlot`.
+    ///
+    /// # Errors
+    /// Propagates the same errors as [`get_consume_slots`](Self::get_consume_slots).
+    ///
+    /// # Examples
+    /// ```
+    /// # #[cfg(feature = "futex")] {
+    /// use std::time::Duration;
+    /// use yep_coc::queue_alloc_helpers::YCFutexQueueOwnedData;
+    /// use yep_coc::YCFutexQueue;
+    ///
+    /// let owned = YCFutexQueueOwnedData::new(2, 32);
+    /// let mut queue = YCFutexQueue::from_owned_data(&owned).unwrap();
+    ///
+    /// let timeout = Duration::from_millis(1);
+    /// let to_publish = queue
+    ///     .get_produce_slots(1, false, timeout, Duration::ZERO)
+    ///     .unwrap();
+    /// queue.mark_slots_produced(to_publish).unwrap();
+    ///
+    /// let slot = queue
+    ///     .get_consume_slot(timeout, Duration::ZERO)
+    ///     .unwrap();
+    /// queue.mark_slot_consumed(slot).unwrap();
+    /// # }
+    /// ```
     pub fn get_consume_slot(
         &mut self,
         timeout: Duration,
@@ -135,6 +284,33 @@ impl<'a> YCFutexQueue<'a> {
     }
 
     /// Mark a single slot as produced and wake any waiting consumers.
+    ///
+    /// # Arguments
+    /// * `slot` - Slot previously obtained from [`get_produce_slot`](Self::get_produce_slot) or
+    ///   [`get_produce_slots`](Self::get_produce_slots).
+    ///
+    /// # Returns
+    /// `Ok(())` when the slot is successfully marked as produced.
+    ///
+    /// # Errors
+    /// Propagates `YCQueueError::InvalidArgs` when the slot metadata does not match the queue.
+    ///
+    /// # Examples
+    /// ```
+    /// # #[cfg(feature = "futex")] {
+    /// use std::time::Duration;
+    /// use yep_coc::queue_alloc_helpers::YCFutexQueueOwnedData;
+    /// use yep_coc::YCFutexQueue;
+    ///
+    /// let owned = YCFutexQueueOwnedData::new(2, 32);
+    /// let mut queue = YCFutexQueue::from_owned_data(&owned).unwrap();
+    ///
+    /// let slot = queue
+    ///     .get_produce_slot(Duration::from_millis(1), Duration::ZERO)
+    ///     .unwrap();
+    /// queue.mark_slot_produced(slot).unwrap();
+    /// # }
+    /// ```
     pub fn mark_slot_produced(&mut self, slot: YCQueueProduceSlot<'a>) -> Result<(), YCQueueError> {
         self.queue.mark_slot_produced(slot)?;
         self.count.fetch_add(1, Ordering::AcqRel);
@@ -143,6 +319,33 @@ impl<'a> YCFutexQueue<'a> {
     }
 
     /// Mark multiple slots as produced and wake waiting consumers.
+    ///
+    /// # Arguments
+    /// * `slots` - Contiguous slots obtained via [`get_produce_slots`](Self::get_produce_slots).
+    ///
+    /// # Returns
+    /// `Ok(())` when all slots are successfully published.
+    ///
+    /// # Errors
+    /// Propagates `YCQueueError::InvalidArgs` when any slot does not belong to this queue.
+    ///
+    /// # Examples
+    /// ```
+    /// # #[cfg(feature = "futex")] {
+    /// use std::time::Duration;
+    /// use yep_coc::queue_alloc_helpers::YCFutexQueueOwnedData;
+    /// use yep_coc::YCFutexQueue;
+    ///
+    /// let owned = YCFutexQueueOwnedData::new(4, 32);
+    /// let mut queue = YCFutexQueue::from_owned_data(&owned).unwrap();
+    ///
+    /// let timeout = Duration::from_millis(1);
+    /// let slots = queue
+    ///     .get_produce_slots(3, false, timeout, Duration::ZERO)
+    ///     .unwrap();
+    /// queue.mark_slots_produced(slots).unwrap();
+    /// # }
+    /// ```
     pub fn mark_slots_produced(
         &mut self,
         slots: Vec<YCQueueProduceSlot<'a>>,
@@ -159,12 +362,83 @@ impl<'a> YCFutexQueue<'a> {
     }
 
     /// Mark a single slot as consumed and notify waiting producers.
+    ///
+    /// Returns the slot to the underlying queue and keeps the produced counter in sync so that
+    /// sleeping producers are woken as capacity becomes available.
+    ///
+    /// # Arguments
+    /// * `slot` - Slot previously obtained from [`get_consume_slot`](Self::get_consume_slot) or
+    ///   [`get_consume_slots`](Self::get_consume_slots).
+    ///
+    /// # Returns
+    /// `Ok(())` when the slot is successfully returned to producers.
+    ///
+    /// # Errors
+    /// Propagates `YCQueueError::InvalidArgs` when the slot metadata does not match the queue.
+    ///
+    /// # Examples
+    /// ```
+    /// # #[cfg(feature = "futex")] {
+    /// use std::time::Duration;
+    /// use yep_coc::queue_alloc_helpers::YCFutexQueueOwnedData;
+    /// use yep_coc::YCFutexQueue;
+    ///
+    /// let owned = YCFutexQueueOwnedData::new(2, 32);
+    /// let mut queue = YCFutexQueue::from_owned_data(&owned).unwrap();
+    ///
+    /// let timeout = Duration::from_millis(1);
+    /// let slots = queue
+    ///     .get_produce_slots(1, false, timeout, Duration::ZERO)
+    ///     .unwrap();
+    /// queue.mark_slots_produced(slots).unwrap();
+    ///
+    /// let slot = queue
+    ///     .get_consume_slot(timeout, Duration::ZERO)
+    ///     .unwrap();
+    /// queue.mark_slot_consumed(slot).unwrap();
+    /// # }
+    /// ```
     pub fn mark_slot_consumed(&mut self, slot: YCQueueConsumeSlot<'a>) -> Result<(), YCQueueError> {
         debug_assert!(self.count.load(Ordering::Relaxed) <= self.queue.capacity() as u32);
         self.queue.mark_slot_consumed(slot)
     }
 
     /// Mark multiple slots as consumed and notify waiting producers.
+    ///
+    /// Accepts the result of [`get_consume_slots`](Self::get_consume_slots) and returns the entire
+    /// batch to the producer pool.
+    ///
+    /// # Arguments
+    /// * `slots` - Contiguous slots obtained via [`get_consume_slots`](Self::get_consume_slots).
+    ///
+    /// # Returns
+    /// `Ok(())` when all slots are successfully returned to the producer side.
+    ///
+    /// # Errors
+    /// Propagates `YCQueueError::InvalidArgs` when any slot does not belong to this queue.
+    ///
+    /// # Examples
+    /// ```
+    /// # #[cfg(feature = "futex")] {
+    /// use std::time::Duration;
+    /// use yep_coc::queue_alloc_helpers::YCFutexQueueOwnedData;
+    /// use yep_coc::YCFutexQueue;
+    ///
+    /// let owned = YCFutexQueueOwnedData::new(4, 32);
+    /// let mut queue = YCFutexQueue::from_owned_data(&owned).unwrap();
+    ///
+    /// let timeout = Duration::from_millis(1);
+    /// let slots = queue
+    ///     .get_produce_slots(4, false, timeout, Duration::ZERO)
+    ///     .unwrap();
+    /// queue.mark_slots_produced(slots).unwrap();
+    ///
+    /// let ready = queue
+    ///     .get_consume_slots(4, false, timeout, Duration::ZERO)
+    ///     .unwrap();
+    /// queue.mark_slots_consumed(ready).unwrap();
+    /// # }
+    /// ```
     pub fn mark_slots_consumed(
         &mut self,
         slots: Vec<YCQueueConsumeSlot<'a>>,
