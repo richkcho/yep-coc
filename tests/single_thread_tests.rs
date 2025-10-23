@@ -200,7 +200,7 @@ mod single_thread_tests {
         let shared_meta = YCQueueSharedMeta::new(&owned_data.meta);
         let mut queue = YCQueue::new(shared_meta, owned_data.data.as_mut_slice()).unwrap();
 
-        let mut produce_slots = queue.get_produce_slots(batch).unwrap();
+        let mut produce_slots = queue.get_produce_slots(batch, false).unwrap();
         for (i, slot) in produce_slots.iter_mut().enumerate() {
             let message = format!("msg-{i}");
             copy_str_to_slice(&message, slot.data);
@@ -210,7 +210,7 @@ mod single_thread_tests {
         assert_eq!(queue.in_flight_count(), batch);
         assert_eq!(queue.produce_idx(), batch);
 
-        let consume_slots = queue.get_consume_slots(batch).unwrap();
+        let consume_slots = queue.get_consume_slots(batch, false).unwrap();
         for (i, slot) in consume_slots.iter().enumerate() {
             let expected = format!("msg-{i}");
             assert_eq!(str_from_u8(slot.data), expected);
@@ -224,7 +224,7 @@ mod single_thread_tests {
         assert_eq!(queue.consume_idx(), batch);
 
         // queue should now allow another batched produce
-        let next_slots = queue.get_produce_slots(batch).unwrap();
+        let next_slots = queue.get_produce_slots(batch, false).unwrap();
         assert_eq!(next_slots[0].index, batch);
         queue.mark_slots_produced(next_slots).unwrap();
     }
@@ -384,7 +384,7 @@ mod single_thread_tests {
 
         for round in 0..slot_count {
             // Step 1: produce entire queue
-            let mut full_batch = queue.get_produce_slots(slot_count).unwrap();
+            let mut full_batch = queue.get_produce_slots(slot_count, false).unwrap();
             for (idx, slot) in full_batch.iter_mut().enumerate() {
                 let msg = format!("batch1-{round}-{idx}");
                 copy_str_to_slice(&msg, slot.data);
@@ -412,7 +412,7 @@ mod single_thread_tests {
             assert_eq!(queue.in_flight_count(), 0);
 
             // Step 4: repeat produce/consume entire queue
-            let mut second_batch = queue.get_produce_slots(slot_count).unwrap();
+            let mut second_batch = queue.get_produce_slots(slot_count, false).unwrap();
             for (idx, slot) in second_batch.iter_mut().enumerate() {
                 let msg = format!("batch2-{round}-{idx}");
                 copy_str_to_slice(&msg, slot.data);

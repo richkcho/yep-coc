@@ -25,10 +25,18 @@ impl<'a> YCFutexQueue<'a> {
         YCFutexQueue { queue, count }
     }
 
-    /// Reserve `num_slots` slots for production, waiting up to `timeout` for space.
+    /// Reserve up to `num_slots` slots for production, optionally accepting a partial batch.
+    ///
+    /// # Arguments
+    /// * `num_slots` - Maximum contiguous slots to claim.
+    /// * `best_effort` - When `true`, returns the currently available contiguous span even if it
+    ///   is smaller than `num_slots`.
+    /// * `timeout` - Maximum time to wait for space before returning `YCQueueError::Timeout`.
+    /// * `retry_interval` - Minimum delay between retries when the queue is not ready yet.
     pub fn get_produce_slots(
         &mut self,
         num_slots: u16,
+        best_effort: bool,
         timeout: Duration,
         retry_interval: Duration,
     ) -> Result<Vec<YCQueueProduceSlot<'a>>, YCQueueError> {
@@ -43,7 +51,7 @@ impl<'a> YCFutexQueue<'a> {
                 None => return Err(YCQueueError::Timeout),
             }
 
-            let ret = self.queue.get_produce_slots(num_slots);
+            let ret = self.queue.get_produce_slots(num_slots, best_effort);
             match ret {
                 Ok(slots) => return Ok(slots),
                 Err(_) => {
@@ -62,49 +70,25 @@ impl<'a> YCFutexQueue<'a> {
         timeout: Duration,
         retry_interval: Duration,
     ) -> Result<YCQueueProduceSlot<'a>, YCQueueError> {
-        let mut slots = self.get_produce_slots(1, timeout, retry_interval)?;
+        let mut slots = self.get_produce_slots(1, false, timeout, retry_interval)?;
 
         Ok(slots
             .pop()
-            .expect("get_produce_slots(1) returned without a slot"))
+            .expect("get_produce_slots(1, false) returned without a slot"))
     }
 
-    /// Best-effort reservation of slots for production, waiting up to `timeout` if needed.
-    pub fn try_get_produce_slots(
-        &mut self,
-        num_slots: u16,
-        timeout: Duration,
-        retry_interval: Duration,
-    ) -> Result<Vec<YCQueueProduceSlot<'a>>, YCQueueError> {
-        let start_time = Instant::now();
-        loop {
-            let wait_start = Instant::now();
-
-            match timeout.checked_sub(start_time.elapsed()) {
-                Some(remaining_timeout) => self
-                    .count
-                    .wait_timeout(self.queue.capacity() as u32, remaining_timeout),
-                None => return Err(YCQueueError::Timeout),
-            }
-
-            let ret = self.queue.try_get_produce_slots(num_slots);
-            match ret {
-                Ok(slots) => return Ok(slots),
-                Err(_) => {
-                    if let Some(remaining_duration) =
-                        wait_start.elapsed().checked_sub(retry_interval)
-                    {
-                        std::thread::sleep(remaining_duration)
-                    }
-                }
-            }
-        }
-    }
-
-    /// Reserve `num_slots` slots for consumption, blocking until the queue is non-empty or timed out.
+    /// Reserve up to `num_slots` slots for consumption, optionally accepting a partial batch.
+    ///
+    /// # Arguments
+    /// * `num_slots` - Maximum contiguous slots to dequeue.
+    /// * `best_effort` - When `true`, returns the currently published contiguous run even if it is
+    ///   smaller than `num_slots`.
+    /// * `timeout` - Maximum time to wait for data before returning `YCQueueError::Timeout`.
+    /// * `retry_interval` - Minimum delay between retries when no slots are currently ready.
     pub fn get_consume_slots(
         &mut self,
         num_slots: u16,
+        best_effort: bool,
         timeout: Duration,
         retry_interval: Duration,
     ) -> Result<Vec<YCQueueConsumeSlot<'a>>, YCQueueError> {
@@ -118,7 +102,7 @@ impl<'a> YCFutexQueue<'a> {
                 None => return Err(YCQueueError::Timeout),
             }
 
-            let ret = self.queue.get_consume_slots(num_slots);
+            let ret = self.queue.get_consume_slots(num_slots, best_effort);
             match ret {
                 Ok(slots) => {
                     self.count.fetch_sub(slots.len() as u32, Ordering::AcqRel);
@@ -143,48 +127,11 @@ impl<'a> YCFutexQueue<'a> {
         timeout: Duration,
         retry_interval: Duration,
     ) -> Result<YCQueueConsumeSlot<'a>, YCQueueError> {
-        let mut slots = self.get_consume_slots(1, timeout, retry_interval)?;
+        let mut slots = self.get_consume_slots(1, false, timeout, retry_interval)?;
 
         Ok(slots
             .pop()
-            .expect("get_consume_slots(1) returned without a slot"))
-    }
-
-    /// Best-effort reservation of slots for consumption, waiting up to `timeout` if needed.
-    pub fn try_get_consume_slots(
-        &mut self,
-        num_slots: u16,
-        timeout: Duration,
-        retry_interval: Duration,
-    ) -> Result<Vec<YCQueueConsumeSlot<'a>>, YCQueueError> {
-        debug_assert!(self.count.load(Ordering::Relaxed) <= self.queue.capacity() as u32);
-        let start_time = Instant::now();
-        loop {
-            let wait_start = Instant::now();
-
-            match timeout.checked_sub(start_time.elapsed()) {
-                Some(remaining_timeout) => self.count.wait_timeout(0, remaining_timeout),
-                None => return Err(YCQueueError::Timeout),
-            }
-
-            let ret = self.queue.try_get_consume_slots(num_slots);
-            match ret {
-                Ok(slots) => {
-                    self.count.fetch_sub(slots.len() as u32, Ordering::AcqRel);
-                    debug_assert!(
-                        self.count.load(Ordering::Relaxed) <= self.queue.capacity() as u32
-                    );
-                    return Ok(slots);
-                }
-                Err(_) => {
-                    if let Some(remaining_duration) =
-                        wait_start.elapsed().checked_sub(retry_interval)
-                    {
-                        std::thread::sleep(remaining_duration)
-                    }
-                }
-            }
-        }
+            .expect("get_consume_slots(1, false) returned without a slot"))
     }
 
     /// Mark a single slot as produced and wake any waiting consumers.
@@ -236,12 +183,12 @@ mod tests {
     const DEFAULT_SMALL_TIMEOUT: Duration = Duration::from_millis(1);
 
     #[test]
-    fn single_slot_roundtrip_and_try_paths() {
+    fn single_slot_roundtrip_and_best_effort_paths() {
         let owned = YCFutexQueueOwnedData::new(4, 32);
         let mut futex_queue = YCFutexQueue::from_owned_data(&owned).unwrap();
 
         let mut slots = futex_queue
-            .get_produce_slots(1, DEFAULT_SMALL_TIMEOUT, Duration::ZERO)
+            .get_produce_slots(1, false, DEFAULT_SMALL_TIMEOUT, Duration::ZERO)
             .expect("reserve slot");
         let slot = slots.pop().expect("slot");
         slot.data[0] = 0x11;
@@ -249,7 +196,7 @@ mod tests {
         assert_eq!(futex_queue.count.load(Ordering::Relaxed), 1);
 
         let mut consume_slots = futex_queue
-            .get_consume_slots(1, DEFAULT_SMALL_TIMEOUT, Duration::ZERO)
+            .get_consume_slots(1, false, DEFAULT_SMALL_TIMEOUT, Duration::ZERO)
             .expect("consume slot");
         let slot = consume_slots.pop().expect("consume slot");
         assert_eq!(slot.data[0], 0x11);
@@ -257,16 +204,16 @@ mod tests {
         assert_eq!(futex_queue.count.load(Ordering::Relaxed), 0);
 
         let mut slots = futex_queue
-            .try_get_produce_slots(1, DEFAULT_SMALL_TIMEOUT, Duration::ZERO)
-            .expect("try reserve slot");
+            .get_produce_slots(1, true, DEFAULT_SMALL_TIMEOUT, Duration::ZERO)
+            .expect("best-effort reserve slot");
         let slot = slots.pop().expect("slot");
         slot.data[0] = 0x22;
         futex_queue.mark_slot_produced(slot).expect("produce");
         assert_eq!(futex_queue.count.load(Ordering::Relaxed), 1);
 
         let mut consume_slots = futex_queue
-            .try_get_consume_slots(1, DEFAULT_SMALL_TIMEOUT, Duration::ZERO)
-            .expect("try consume slot");
+            .get_consume_slots(1, true, DEFAULT_SMALL_TIMEOUT, Duration::ZERO)
+            .expect("best-effort consume slot");
         let slot = consume_slots.pop().expect("consume slot");
         assert_eq!(slot.data[0], 0x22);
         futex_queue.mark_slot_consumed(slot).expect("consume");
@@ -279,7 +226,7 @@ mod tests {
         let mut futex_queue = YCFutexQueue::from_owned_data(&owned).unwrap();
 
         let mut slots = futex_queue
-            .get_produce_slots(4, DEFAULT_SMALL_TIMEOUT, Duration::ZERO)
+            .get_produce_slots(4, false, DEFAULT_SMALL_TIMEOUT, Duration::ZERO)
             .expect("reserve batch");
         for (i, slot) in slots.iter_mut().enumerate() {
             slot.data[0] = i as u8;
@@ -290,7 +237,7 @@ mod tests {
         assert_eq!(futex_queue.count.load(Ordering::Relaxed), 4);
 
         let consume_first = futex_queue
-            .get_consume_slots(2, DEFAULT_SMALL_TIMEOUT, Duration::ZERO)
+            .get_consume_slots(2, false, DEFAULT_SMALL_TIMEOUT, Duration::ZERO)
             .expect("consume first half");
         assert_eq!(futex_queue.count.load(Ordering::Relaxed), 2);
         futex_queue
@@ -298,7 +245,7 @@ mod tests {
             .expect("consume first half");
 
         let consume_second = futex_queue
-            .get_consume_slots(2, DEFAULT_SMALL_TIMEOUT, Duration::ZERO)
+            .get_consume_slots(2, false, DEFAULT_SMALL_TIMEOUT, Duration::ZERO)
             .expect("consume second half");
         assert_eq!(futex_queue.count.load(Ordering::Relaxed), 0);
         for (i, slot) in consume_second.iter().enumerate() {
@@ -317,19 +264,19 @@ mod tests {
 
         assert_eq!(
             futex_queue
-                .get_consume_slots(1, DEFAULT_SMALL_TIMEOUT, Duration::ZERO)
+                .get_consume_slots(1, false, DEFAULT_SMALL_TIMEOUT, Duration::ZERO)
                 .expect_err("empty queue should time out"),
             YCQueueError::Timeout
         );
         assert_eq!(
             futex_queue
-                .try_get_consume_slots(1, DEFAULT_SMALL_TIMEOUT, Duration::ZERO)
+                .get_consume_slots(1, true, DEFAULT_SMALL_TIMEOUT, Duration::ZERO)
                 .expect_err("empty queue should time out"),
             YCQueueError::Timeout
         );
 
         let slots = futex_queue
-            .get_produce_slots(slot_count, DEFAULT_SMALL_TIMEOUT, Duration::ZERO)
+            .get_produce_slots(slot_count, false, DEFAULT_SMALL_TIMEOUT, Duration::ZERO)
             .expect("reserve full queue");
         futex_queue
             .mark_slots_produced(slots)
@@ -338,19 +285,19 @@ mod tests {
 
         assert_eq!(
             futex_queue
-                .get_produce_slots(1, DEFAULT_SMALL_TIMEOUT, Duration::ZERO)
+                .get_produce_slots(1, false, DEFAULT_SMALL_TIMEOUT, Duration::ZERO)
                 .expect_err("full queue should time out"),
             YCQueueError::Timeout
         );
         assert_eq!(
             futex_queue
-                .try_get_produce_slots(1, DEFAULT_SMALL_TIMEOUT, Duration::ZERO)
+                .get_produce_slots(1, true, DEFAULT_SMALL_TIMEOUT, Duration::ZERO)
                 .expect_err("full queue should time out"),
             YCQueueError::Timeout
         );
 
         let pending = futex_queue
-            .get_consume_slots(slot_count, DEFAULT_SMALL_TIMEOUT, Duration::ZERO)
+            .get_consume_slots(slot_count, false, DEFAULT_SMALL_TIMEOUT, Duration::ZERO)
             .expect("drain queue");
         futex_queue
             .mark_slots_consumed(pending)

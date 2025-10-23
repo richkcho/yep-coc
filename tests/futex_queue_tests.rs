@@ -51,7 +51,9 @@ mod futex_queue_tests {
                             consume_queue.mark_slot_consumed(consume_slot).unwrap();
                             counter += 1;
                         }
-                        Err(YCQueueError::EmptyQueue) | Err(YCQueueError::SlotNotReady) => {
+                        Err(YCQueueError::EmptyQueue)
+                        | Err(YCQueueError::SlotNotReady)
+                        | Err(YCQueueError::Timeout) => {
                             // no data yet, just spin
                             std::thread::yield_now();
                         }
@@ -74,7 +76,9 @@ mod futex_queue_tests {
                             produce_queue.mark_slot_produced(produce_slot).unwrap();
                             counter += 1;
                         }
-                        Err(YCQueueError::OutOfSpace) | Err(YCQueueError::SlotNotReady) => {
+                        Err(YCQueueError::OutOfSpace)
+                        | Err(YCQueueError::SlotNotReady)
+                        | Err(YCQueueError::Timeout) => {
                             // queue is full, just spin
                             std::thread::yield_now();
                         }
@@ -196,7 +200,9 @@ mod futex_queue_tests {
                                     );
                                     id = counter.fetch_add(1, Ordering::AcqRel);
                                 }
-                                Err(YCQueueError::OutOfSpace) | Err(YCQueueError::SlotNotReady) => {
+                                Err(YCQueueError::OutOfSpace)
+                                | Err(YCQueueError::SlotNotReady)
+                                | Err(YCQueueError::Timeout) => {
                                     // queue is full, just spin
                                     std::thread::yield_now();
                                 }

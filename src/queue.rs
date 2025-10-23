@@ -305,11 +305,42 @@ impl<'a> YCQueue<'a> {
         self.slot_count
     }
 
-    /// Core implementation for producer slot reservation.
+    /// Reserve contiguous slots for producers, optionally in best-effort mode.
     ///
     /// When `best_effort` is `false`, the function succeeds only if all `num_slots` are available;
     /// otherwise it returns as many contiguous slots as currently ready.
-    fn get_produce_slots_internal(
+    ///
+    /// # Arguments
+    /// * `num_slots` - Maximum number of contiguous slots to attempt to reserve.
+    /// * `best_effort` - When `true`, grants a partial batch instead of requiring `num_slots`.
+    ///
+    /// # Returns
+    /// `Ok` containing one or more slots when reservation succeeds.
+    ///
+    /// # Errors
+    /// Returns `YCQueueError::InvalidArgs` when `num_slots` is zero or exceeds capacity,
+    /// `YCQueueError::OutOfSpace` when there is no remaining capacity, and
+    /// `YCQueueError::SlotNotReady` when the requested slots are not owned by the producer.
+    ///
+    /// # Examples
+    /// ```
+    /// use yep_coc::queue_alloc_helpers::YCQueueOwnedData;
+    /// use yep_coc::{YCQueue, YCQueueSharedMeta};
+    ///
+    /// let mut owned = YCQueueOwnedData::new(4, 16);
+    /// let shared = YCQueueSharedMeta::new(&owned.meta);
+    /// let mut queue = YCQueue::new(shared, owned.data.as_mut_slice()).unwrap();
+    ///
+    /// let slots = queue.get_produce_slots(2, false).unwrap();
+    /// assert_eq!(slots.len(), 2);
+    /// queue.mark_slots_produced(slots).unwrap();
+    ///
+    /// let partial = queue.get_produce_slots(2, true).unwrap();
+    /// assert!(!partial.is_empty());
+    /// queue.mark_slots_produced(partial).unwrap();
+    /// ```
+    #[inline]
+    pub fn get_produce_slots(
         &mut self,
         mut num_slots: u16,
         best_effort: bool,
@@ -383,70 +414,6 @@ impl<'a> YCQueue<'a> {
         Ok(slots)
     }
 
-    /// Reserve `num_slots` contiguous slots for to produce into. Fails if not all requested slots are available.
-    ///
-    /// # Arguments
-    /// * `num_slots` - Number of contiguous slots the caller would like to reserve.
-    ///
-    /// # Returns
-    /// `Ok` containing exactly `num_slots` slots when the reservation succeeds.
-    ///
-    /// # Errors
-    /// Returns `YCQueueError::InvalidArgs` when `num_slots` is zero or exceeds the queue capacity, `YCQueueError::OutOfSpace` when there is no remaining capacity, and `YCQueueError::SlotNotReady` when another owner is holding one of the requested slots.
-    ///
-    /// # Examples
-    /// ```
-    /// use yep_coc::queue_alloc_helpers::YCQueueOwnedData;
-    /// use yep_coc::{YCQueue, YCQueueSharedMeta};
-    ///
-    /// let mut owned = YCQueueOwnedData::new(4, 16);
-    /// let shared = YCQueueSharedMeta::new(&owned.meta);
-    /// let mut queue = YCQueue::new(shared, owned.data.as_mut_slice()).unwrap();
-    ///
-    /// let slots = queue.get_produce_slots(2).unwrap();
-    /// assert_eq!(slots.len(), 2);
-    /// queue.mark_slots_produced(slots).unwrap();
-    /// ```
-    #[inline]
-    pub fn get_produce_slots(
-        &mut self,
-        num_slots: u16,
-    ) -> Result<Vec<YCQueueProduceSlot<'a>>, YCQueueError> {
-        self.get_produce_slots_internal(num_slots, false)
-    }
-
-    /// Reserve up to `num_slots` contiguous slots to produce into. May return fewer than requested slots when only a partial run is currently free.
-    ///
-    /// # Arguments
-    /// * `num_slots` - Maximum number of contiguous slots to attempt to reserve.
-    ///
-    /// # Returns
-    /// `Ok` containing the slots that were successfully reserved. The vector length is between one and `num_slots`.
-    ///
-    /// # Errors
-    /// Returns `YCQueueError::InvalidArgs` when `num_slots` is zero or exceeds the queue capacity, `YCQueueError::OutOfSpace` when the queue is at capacity, and `YCQueueError::SlotNotReady` when no slots are immediately available.
-    ///
-    /// # Examples
-    /// ```
-    /// use yep_coc::queue_alloc_helpers::YCQueueOwnedData;
-    /// use yep_coc::{YCQueue, YCQueueSharedMeta};
-    ///
-    /// let mut owned = YCQueueOwnedData::new(4, 16);
-    /// let shared = YCQueueSharedMeta::new(&owned.meta);
-    /// let mut queue = YCQueue::new(shared, owned.data.as_mut_slice()).unwrap();
-    ///
-    /// let slots = queue.try_get_produce_slots(2).unwrap();
-    /// assert!(slots.len() <= 2);
-    /// queue.mark_slots_produced(slots).unwrap();
-    /// ```
-    #[inline]
-    pub fn try_get_produce_slots(
-        &mut self,
-        num_slots: u16,
-    ) -> Result<Vec<YCQueueProduceSlot<'a>>, YCQueueError> {
-        self.get_produce_slots_internal(num_slots, true)
-    }
-
     /// Reserve a single slot to produce into.
     ///
     /// # Returns
@@ -471,11 +438,11 @@ impl<'a> YCQueue<'a> {
     /// ```
     #[inline]
     pub fn get_produce_slot(&mut self) -> Result<YCQueueProduceSlot<'a>, YCQueueError> {
-        let mut slots = self.get_produce_slots(1)?;
+        let mut slots = self.get_produce_slots(1, false)?;
 
         Ok(slots
             .pop()
-            .expect("get_produce_slots(1) returned without a slot"))
+            .expect("get_produce_slots(1, false) returned without a slot"))
     }
 
     /// Mark a slot as produced into. This makes it available to consumers.
@@ -531,7 +498,7 @@ impl<'a> YCQueue<'a> {
     /// Mark multiple slots as produced into. This makes them available to consumers.
     ///
     /// # Arguments
-    /// * `queue_slots` - Contiguous slots previously obtained from [`get_produce_slots`](Self::get_produce_slots) or [`try_get_produce_slots`](Self::try_get_produce_slots).
+    /// * `queue_slots` - Contiguous slots previously obtained from [`get_produce_slots`](Self::get_produce_slots).
     ///
     /// # Returns
     /// `Ok(())` when ownership is returned to consumers.
@@ -548,7 +515,7 @@ impl<'a> YCQueue<'a> {
     /// let shared = YCQueueSharedMeta::new(&owned.meta);
     /// let mut queue = YCQueue::new(shared, owned.data.as_mut_slice()).unwrap();
     ///
-    /// let slots = queue.get_produce_slots(4).unwrap();
+    /// let slots = queue.get_produce_slots(4, false).unwrap();
     /// queue.mark_slots_produced(slots).unwrap();
     /// assert_eq!(queue.in_flight_count(), 4);
     /// ```
@@ -588,10 +555,43 @@ impl<'a> YCQueue<'a> {
         self.set_owner_range(start_index, count as u16, YCQueueOwner::Consumer)
     }
 
-    /// Core implementation for consumer slot reservation mirroring producer behavior.
+    /// Reserve contiguous slots for consumers, optionally in best-effort mode.
     ///
-    /// Honors `best_effort` semantics in the same way as `get_produce_slots_internal`.
-    fn get_consume_slots_internal(
+    /// When `best_effort` is `false`, the function succeeds only if all `num_slots` are ready;
+    /// otherwise it returns as many contiguous slots as currently published.
+    ///
+    /// # Arguments
+    /// * `num_slots` - Maximum number of contiguous slots to attempt to dequeue.
+    /// * `best_effort` - When `true`, grants a partial batch instead of requiring `num_slots`.
+    ///
+    /// # Returns
+    /// `Ok` containing one or more ready slots when the reservation succeeds.
+    ///
+    /// # Errors
+    /// Returns `YCQueueError::InvalidArgs` when `num_slots` is zero or exceeds capacity,
+    /// `YCQueueError::EmptyQueue` when nothing has been produced yet, and
+    /// `YCQueueError::SlotNotReady` when the requested slots have not all been published.
+    ///
+    /// # Examples
+    /// ```
+    /// use yep_coc::queue_alloc_helpers::YCQueueOwnedData;
+    /// use yep_coc::{YCQueue, YCQueueSharedMeta};
+    ///
+    /// let mut owned = YCQueueOwnedData::new(4, 16);
+    /// let shared = YCQueueSharedMeta::new(&owned.meta);
+    /// let mut queue = YCQueue::new(shared, owned.data.as_mut_slice()).unwrap();
+    ///
+    /// let produce = queue.get_produce_slots(4, false).unwrap();
+    /// queue.mark_slots_produced(produce).unwrap();
+    ///
+    /// let consume = queue.get_consume_slots(2, false).unwrap();
+    /// assert_eq!(consume.len(), 2);
+    ///
+    /// let partial = queue.get_consume_slots(2, true).unwrap();
+    /// assert!(!partial.is_empty());
+    /// ```
+    #[inline]
+    pub fn get_consume_slots(
         &mut self,
         mut num_slots: u16,
         best_effort: bool,
@@ -660,81 +660,6 @@ impl<'a> YCQueue<'a> {
         Ok(slots)
     }
 
-    /// Reserve `num_slots` contiguous slots for consumption. Fails if not all requested slots are available.
-    ///
-    /// # Arguments
-    /// * `num_slots` - Number of contiguous slots the consumer wants to dequeue.
-    ///
-    /// # Returns
-    /// `Ok` containing exactly `num_slots` ready-to-consume slots.
-    ///
-    /// # Errors
-    /// Returns `YCQueueError::InvalidArgs` when `num_slots` is zero or exceeds the queue capacity, `YCQueueError::EmptyQueue` when nothing has been produced, and `YCQueueError::SlotNotReady` when the required contiguous slots are not yet published.
-    ///
-    /// # Examples
-    /// ```
-    /// use yep_coc::queue_alloc_helpers::YCQueueOwnedData;
-    /// use yep_coc::{YCQueue, YCQueueSharedMeta};
-    ///
-    /// let mut owned = YCQueueOwnedData::new(4, 16);
-    /// let shared = YCQueueSharedMeta::new(&owned.meta);
-    /// let mut queue = YCQueue::new(shared, owned.data.as_mut_slice()).unwrap();
-    ///
-    /// let produce = queue.get_produce_slots(2).unwrap();
-    /// queue.mark_slots_produced(produce).unwrap();
-    /// let consume = queue.get_consume_slots(2).unwrap();
-    /// assert_eq!(consume.len(), 2);
-    /// ```
-    #[inline]
-    pub fn get_consume_slots(
-        &mut self,
-        num_slots: u16,
-    ) -> Result<Vec<YCQueueConsumeSlot<'a>>, YCQueueError> {
-        self.get_consume_slots_internal(num_slots, false)
-    }
-
-    /// Reserve up to `num_slots` contiguous slots for consumption. May return fewer than requested slots when later slots have not yet been published.
-    ///
-    /// # Arguments
-    /// * `num_slots` - Maximum number of contiguous slots to attempt to dequeue.
-    ///
-    /// # Returns
-    /// `Ok` containing the slots that were successfully reserved. The vector length is between one and `num_slots`.
-    ///
-    /// # Errors
-    /// Returns `YCQueueError::InvalidArgs` when `num_slots` is zero or exceeds the queue capacity, `YCQueueError::EmptyQueue` when nothing is available, and `YCQueueError::SlotNotReady` when no slots are currently ready.
-    ///
-    /// # Examples
-    /// ```
-    /// use yep_coc::queue_alloc_helpers::YCQueueOwnedData;
-    /// use yep_coc::{YCQueue, YCQueueSharedMeta};
-    ///
-    /// let mut owned = YCQueueOwnedData::new(4, 16);
-    /// let shared = YCQueueSharedMeta::new(&owned.meta);
-    /// let mut queue = YCQueue::new(shared, owned.data.as_mut_slice()).unwrap();
-    ///
-    /// let mut slots = queue.get_produce_slots(2).unwrap();
-    /// let first = slots.remove(0);
-    /// let second = slots.pop().unwrap();
-    ///
-    /// queue.mark_slot_produced(first).unwrap();
-    ///
-    /// let mut consume = queue.try_get_consume_slots(2).unwrap();
-    /// assert_eq!(consume.len(), 1);
-    /// queue.mark_slot_consumed(consume.pop().unwrap()).unwrap();
-    ///
-    /// queue.mark_slot_produced(second).unwrap();
-    /// let leftover = queue.get_consume_slot().unwrap();
-    /// queue.mark_slot_consumed(leftover).unwrap();
-    /// ```
-    #[inline]
-    pub fn try_get_consume_slots(
-        &mut self,
-        num_slots: u16,
-    ) -> Result<Vec<YCQueueConsumeSlot<'a>>, YCQueueError> {
-        self.get_consume_slots_internal(num_slots, true)
-    }
-
     /// Reserve a single slot for consumption.
     ///
     /// # Returns
@@ -759,11 +684,11 @@ impl<'a> YCQueue<'a> {
     /// assert_eq!(consume.index, 0);
     /// ```
     pub fn get_consume_slot(&mut self) -> Result<YCQueueConsumeSlot<'a>, YCQueueError> {
-        let mut slots = self.get_consume_slots(1)?;
+        let mut slots = self.get_consume_slots(1, false)?;
 
         Ok(slots
             .pop()
-            .expect("get_consume_slots(1) returned without a slot"))
+            .expect("get_consume_slots(1, false) returned without a slot"))
     }
 
     /// Return an individual consumption slot back to the producer pool.
@@ -816,7 +741,7 @@ impl<'a> YCQueue<'a> {
     /// Return multiple consumption slots back to the producer pool at once.
     ///
     /// # Arguments
-    /// * `queue_slots` - Contiguous slots previously obtained from [`get_consume_slots`](Self::get_consume_slots) or [`try_get_consume_slots`](Self::try_get_consume_slots).
+    /// * `queue_slots` - Contiguous slots previously obtained from [`get_consume_slots`](Self::get_consume_slots).
     ///
     /// # Returns
     /// `Ok(())` when all slots are reclaimed for producers.
@@ -833,9 +758,9 @@ impl<'a> YCQueue<'a> {
     /// let shared = YCQueueSharedMeta::new(&owned.meta);
     /// let mut queue = YCQueue::new(shared, owned.data.as_mut_slice()).unwrap();
     ///
-    /// let produce = queue.get_produce_slots(4).unwrap();
+    /// let produce = queue.get_produce_slots(4, false).unwrap();
     /// queue.mark_slots_produced(produce).unwrap();
-    /// let consume = queue.get_consume_slots(4).unwrap();
+    /// let consume = queue.get_consume_slots(4, false).unwrap();
     /// queue.mark_slots_consumed(consume).unwrap();
     /// assert_eq!(queue.in_flight_count(), 0);
     /// ```
@@ -942,7 +867,7 @@ mod tests {
         assert_eq!(queue.consume_idx(), 0);
 
         let produce_batch = 3;
-        let produce_slots = queue.get_produce_slots(produce_batch).unwrap();
+        let produce_slots = queue.get_produce_slots(produce_batch, false).unwrap();
         let produced_indices: Vec<_> = produce_slots.iter().map(|slot| slot.index).collect();
         assert_eq!(produced_indices, vec![0, 1, 2]);
         assert_eq!(queue.in_flight_count(), produce_batch);
@@ -959,7 +884,7 @@ mod tests {
         );
         assert_eq!(queue.in_flight_count(), produce_batch);
 
-        let consume_slots_first = queue.get_consume_slots(2).unwrap();
+        let consume_slots_first = queue.get_consume_slots(2, false).unwrap();
         let consumed_indices: Vec<_> = consume_slots_first.iter().map(|slot| slot.index).collect();
         assert_eq!(consumed_indices, vec![0, 1]);
         assert_eq!(queue.consume_idx(), 2);
@@ -972,7 +897,7 @@ mod tests {
         assert_eq!(queue.check_owner(2, 1, YCQueueOwner::Consumer), 1u16);
         assert_eq!(queue.in_flight_count(), 1);
 
-        let final_slot = queue.get_consume_slots(1).unwrap();
+        let final_slot = queue.get_consume_slots(1, false).unwrap();
         assert_eq!(final_slot[0].index, 2);
         assert_eq!(queue.in_flight_count(), 0);
         assert_eq!(queue.consume_idx(), 3);
@@ -988,7 +913,7 @@ mod tests {
     }
 
     #[test]
-    fn try_get_produce_slots_partial_batch() {
+    fn best_effort_produce_partial_batch() {
         let slot_count: u16 = 4;
         let slot_size: u16 = 32;
 
@@ -996,11 +921,11 @@ mod tests {
         let mut queue = YCQueue::from_owned_data(&owned).unwrap();
 
         // Publish three slots so the consumer can hold one and block the wrap-around slot.
-        let produce_slots = queue.get_produce_slots(3).unwrap();
+        let produce_slots = queue.get_produce_slots(3, false).unwrap();
         queue.mark_slots_produced(produce_slots).unwrap();
 
         // Hold one consumed slot to keep ownership on the far side of the ring.
-        let mut consume_slots = queue.get_consume_slots(2).unwrap();
+        let mut consume_slots = queue.get_consume_slots(2, false).unwrap();
         let first = consume_slots.remove(0);
         queue.mark_slot_consumed(first).unwrap();
         let pending = consume_slots
@@ -1008,7 +933,7 @@ mod tests {
             .expect("expect a remaining slot to stay in consumer hands");
 
         // Best-effort reservation should only hand out the contiguous run before the pending slot.
-        let partial = queue.try_get_produce_slots(3).unwrap();
+        let partial = queue.get_produce_slots(3, true).unwrap();
         assert_eq!(partial.len(), 2);
         assert_eq!(partial[0].index, 3);
         assert_eq!(partial[1].index, 0);
@@ -1017,19 +942,19 @@ mod tests {
         queue.mark_slots_produced(partial).unwrap();
         queue.mark_slot_consumed(pending).unwrap();
 
-        let remaining = queue.get_consume_slots(3).unwrap();
+        let remaining = queue.get_consume_slots(3, false).unwrap();
         queue.mark_slots_consumed(remaining).unwrap();
     }
 
     #[test]
-    fn try_get_consume_slots_partial_batch() {
+    fn best_effort_consume_partial_batch() {
         let slot_count: u16 = 4;
         let slot_size: u16 = 32;
 
         let owned = YCQueueOwnedData::new(slot_count, slot_size);
         let mut queue = YCQueue::from_owned_data(&owned).unwrap();
 
-        let mut produce = queue.get_produce_slots(2).unwrap();
+        let mut produce = queue.get_produce_slots(2, false).unwrap();
         let first_ready = produce.remove(0);
         let second_in_progress = produce
             .pop()
@@ -1037,14 +962,14 @@ mod tests {
 
         // No slots have been published yet, so best-effort should report a temporary stall.
         assert_eq!(
-            queue.try_get_consume_slots(1).unwrap_err(),
+            queue.get_consume_slots(1, true).unwrap_err(),
             YCQueueError::SlotNotReady
         );
 
         queue.mark_slot_produced(first_ready).unwrap();
 
         // Only the published slot should be returned even though two were reserved.
-        let mut consume = queue.try_get_consume_slots(2).unwrap();
+        let mut consume = queue.get_consume_slots(2, true).unwrap();
         assert_eq!(consume.len(), 1);
         assert_eq!(consume[0].index, 0);
 
@@ -1065,7 +990,7 @@ mod tests {
         let owned = YCQueueOwnedData::new(slot_count, slot_size);
         let mut queue = YCQueue::from_owned_data(&owned).unwrap();
 
-        let initial_slots = queue.get_produce_slots(slot_count).unwrap();
+        let initial_slots = queue.get_produce_slots(slot_count, false).unwrap();
         assert_eq!(queue.in_flight_count(), slot_count);
         assert_eq!(queue.produce_idx(), 0);
 
@@ -1075,7 +1000,7 @@ mod tests {
             slot_count
         );
 
-        let first_consumed = queue.get_consume_slots(slot_count).unwrap();
+        let first_consumed = queue.get_consume_slots(slot_count, false).unwrap();
         assert_eq!(queue.in_flight_count(), 0);
         assert_eq!(queue.consume_idx(), 0);
 
@@ -1088,7 +1013,7 @@ mod tests {
         assert_eq!(queue.produce_idx(), 0);
         assert_eq!(queue.consume_idx(), 0);
 
-        let mut wrap_slots = queue.get_produce_slots(3).unwrap();
+        let mut wrap_slots = queue.get_produce_slots(3, false).unwrap();
         let start_idx = wrap_slots[0].index;
         assert!(start_idx <= slot_count - 3 || start_idx == slot_count - 3);
 
@@ -1099,7 +1024,7 @@ mod tests {
         queue.mark_slots_produced(wrap_slots).unwrap();
         assert_eq!(queue.in_flight_count(), 3);
 
-        let consumed = queue.get_consume_slots(3).unwrap();
+        let consumed = queue.get_consume_slots(3, false).unwrap();
         let values: Vec<u8> = consumed.iter().map(|slot| slot.data[0]).collect();
         assert_eq!(values, vec![0xAA, 0xBB, 0xCC]);
         assert_eq!(queue.consume_idx(), (start_idx + 3) % slot_count);

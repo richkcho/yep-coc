@@ -107,7 +107,7 @@ mod multi_thread_tests {
                     let remaining = total_messages - next_expected;
                     let request = std::cmp::min(batch_size as usize, remaining) as u16;
 
-                    match consume_queue.get_consume_slots(request) {
+                    match consume_queue.get_consume_slots(request, false) {
                         Ok(slots) => {
                             for (offset, slot) in slots.iter().enumerate() {
                                 let expected = format!("hello-{}", next_expected + offset);
@@ -141,7 +141,7 @@ mod multi_thread_tests {
                     let remaining = total_messages - next_to_send;
                     let request = std::cmp::min(batch_size as usize, remaining) as u16;
 
-                    match produce_queue.get_produce_slots(request) {
+                    match produce_queue.get_produce_slots(request, false) {
                         Ok(mut slots) => {
                             for (offset, slot) in slots.iter_mut().enumerate() {
                                 let msg = format!("hello-{}", next_to_send + offset);
@@ -383,7 +383,7 @@ mod multi_thread_tests {
                                 break;
                             }
 
-                            match consume_queue.get_consume_slots(request) {
+                            match consume_queue.get_consume_slots(request, false) {
                                 Ok(slots) => {
                                     for slot in slots.iter() {
                                         let message = str_from_u8(slot.data);
@@ -457,7 +457,7 @@ mod multi_thread_tests {
                             let request = std::cmp::min(batch_size as u32, remaining) as u16;
 
                             loop {
-                                match produce_queue.get_produce_slots(request) {
+                                match produce_queue.get_produce_slots(request, false) {
                                     Ok(mut slots) => {
                                         for (offset, slot) in slots.iter_mut().enumerate() {
                                             let id = chunk_start + offset as u32;
