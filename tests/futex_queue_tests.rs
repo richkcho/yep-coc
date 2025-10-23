@@ -34,6 +34,9 @@ mod futex_queue_tests {
         let mut consume_queue = YCFutexQueue::from_shared_data(consume_data).unwrap();
         let mut produce_queue = YCFutexQueue::from_shared_data(produce_data).unwrap();
 
+        let timeout = std::time::Duration::from_secs(10);
+        let deadline = std::time::Instant::now() + timeout;
+
         std::thread::scope(|s| {
             // consumer thread
             s.spawn(move || {
@@ -61,6 +64,10 @@ mod futex_queue_tests {
                             panic!("unexpected error when consuming: {e:?}");
                         }
                     }
+
+                    if std::time::Instant::now() > deadline {
+                        panic!("test timed out after {timeout:?}");
+                    }
                 }
             });
 
@@ -85,6 +92,10 @@ mod futex_queue_tests {
                         Err(e) => {
                             panic!("unexpected error when producing: {e:?}");
                         }
+                    }
+
+                    if std::time::Instant::now() > deadline {
+                        panic!("test timed out after {timeout:?}");
                     }
                 }
             });

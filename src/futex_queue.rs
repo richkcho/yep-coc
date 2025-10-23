@@ -218,6 +218,8 @@ impl<'a> YCFutexQueue<'a> {
             match ret {
                 Ok(slots) => {
                     self.count.fetch_sub(slots.len() as u32, Ordering::AcqRel);
+                    // Wake any producers that might be waiting for capacity.
+                    self.count.notify_all();
                     debug_assert!(
                         self.count.load(Ordering::Relaxed) <= self.queue.capacity() as u32
                     );
@@ -314,6 +316,7 @@ impl<'a> YCFutexQueue<'a> {
     pub fn mark_slot_produced(&mut self, slot: YCQueueProduceSlot<'a>) -> Result<(), YCQueueError> {
         self.queue.mark_slot_produced(slot)?;
         self.count.fetch_add(1, Ordering::AcqRel);
+        // wait consumers that could be waiting
         self.count.notify_all();
         Ok(())
     }
@@ -357,6 +360,7 @@ impl<'a> YCFutexQueue<'a> {
         let num_produced = slots.len() as u32;
         self.queue.mark_slots_produced(slots)?;
         self.count.fetch_add(num_produced, Ordering::AcqRel);
+        // wait consumers that could be waiting
         self.count.notify_all();
         Ok(())
     }
