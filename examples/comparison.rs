@@ -158,11 +158,10 @@ fn run_mutex_vecdeque(args: &Args, slot_size: u16, default_message: &str) -> Dur
 
                     if let Some(buf) = maybe_msg {
                         if args.msg_check_len > 0 {
-                            for i in 0..args.msg_check_len as usize {
+                            for (i, got) in buf.iter().enumerate().take(args.msg_check_len as usize) {
                                 let expected = PATTERN.as_bytes()
                                     [(messages_received as usize + i) % PATTERN.len()];
-                                let got = buf[i];
-                                if expected != got {
+                                if expected != *got {
                                     panic!(
                                         "Mutex+VecDeque mismatch at message {}, byte {}: expected '{}' got '{}'",
                                         messages_received, i, expected, got
@@ -207,10 +206,10 @@ fn run_mutex_vecdeque(args: &Args, slot_size: u16, default_message: &str) -> Dur
                     // Build message buffer
                     let mut buf = vec![0u8; slot_size as usize];
                     if args.msg_check_len > 0 {
-                        for i in 0..args.msg_check_len as usize {
+                        for (i, dst) in buf.iter_mut().enumerate().take(args.msg_check_len as usize) {
                             let b =
                                 PATTERN.as_bytes()[(messages_sent as usize + i) % PATTERN.len()];
-                            buf[i] = b;
+                            *dst = b;
                         }
                     } else {
                         copy_str_to_slice(default_message, &mut buf);
