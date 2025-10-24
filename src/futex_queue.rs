@@ -1,5 +1,5 @@
 use std::{
-    sync::atomic::{AtomicU32, Ordering},
+    sync::atomic::{AtomicI32, Ordering},
     time::{Duration, Instant},
 };
 
@@ -16,7 +16,7 @@ use crate::{YCQueue, YCQueueConsumeSlot, YCQueueError, YCQueueProduceSlot};
 /// until the counter changes or a timeout expires.
 pub struct YCFutexQueue<'a> {
     pub queue: YCQueue<'a>,
-    pub count: &'a AtomicU32,
+    pub count: &'a AtomicI32,
 }
 
 impl<'a> YCFutexQueue<'a> {
@@ -98,7 +98,7 @@ impl<'a> YCFutexQueue<'a> {
             match timeout.checked_sub(start_time.elapsed()) {
                 Some(remaining_timeout) => self
                     .count
-                    .wait_timeout(self.queue.capacity() as u32, remaining_timeout),
+                    .wait_timeout(self.queue.capacity() as i32, remaining_timeout),
                 None => return Err(YCQueueError::Timeout),
             }
 
@@ -204,7 +204,6 @@ impl<'a> YCFutexQueue<'a> {
         timeout: Duration,
         retry_interval: Duration,
     ) -> Result<Vec<YCQueueConsumeSlot<'a>>, YCQueueError> {
-        debug_assert!(self.count.load(Ordering::Relaxed) <= self.queue.capacity() as u32);
         let start_time = Instant::now();
         loop {
             let wait_start = Instant::now();
@@ -217,12 +216,17 @@ impl<'a> YCFutexQueue<'a> {
             let ret = self.queue.get_consume_slots(num_slots, best_effort);
             match ret {
                 Ok(slots) => {
-                    self.count.fetch_sub(slots.len() as u32, Ordering::AcqRel);
+                    /*
+                     * Because we subntract after successfully getting slots, it's possible that the slots have *already*
+                     * been produced by another thread between the time we woke up and the time we subtracted here.
+                     * This is okay, because the queue itself ensures that we only get slots that are actually produced.
+                     * This allows the count to go beyond the queue capacity temporarily, but we should always have
+                     * a non-zero count when there are slots to consume.
+                     */
+                    self.count.fetch_sub(slots.len() as i32, Ordering::AcqRel);
+                    debug_assert!(self.count.load(Ordering::Relaxed) >= 0);
                     // Wake any producers that might be waiting for capacity.
                     self.count.notify_all();
-                    debug_assert!(
-                        self.count.load(Ordering::Relaxed) <= self.queue.capacity() as u32
-                    );
                     return Ok(slots);
                 }
                 Err(_) => {
@@ -314,9 +318,9 @@ impl<'a> YCFutexQueue<'a> {
     /// # }
     /// ```
     pub fn mark_slot_produced(&mut self, slot: YCQueueProduceSlot<'a>) -> Result<(), YCQueueError> {
-        self.queue.mark_slot_produced(slot)?;
+        debug_assert!(self.count.load(Ordering::Relaxed) >= 0);
         self.count.fetch_add(1, Ordering::AcqRel);
-        // wait consumers that could be waiting
+        self.queue.mark_slot_produced(slot)?;
         self.count.notify_all();
         Ok(())
     }
@@ -357,10 +361,10 @@ impl<'a> YCFutexQueue<'a> {
             return Ok(());
         }
 
-        let num_produced = slots.len() as u32;
-        self.queue.mark_slots_produced(slots)?;
+        let num_produced = slots.len() as i32;
+        debug_assert!(self.count.load(Ordering::Relaxed) >= 0);
         self.count.fetch_add(num_produced, Ordering::AcqRel);
-        // wait consumers that could be waiting
+        self.queue.mark_slots_produced(slots)?;
         self.count.notify_all();
         Ok(())
     }
@@ -403,7 +407,6 @@ impl<'a> YCFutexQueue<'a> {
     /// # }
     /// ```
     pub fn mark_slot_consumed(&mut self, slot: YCQueueConsumeSlot<'a>) -> Result<(), YCQueueError> {
-        debug_assert!(self.count.load(Ordering::Relaxed) <= self.queue.capacity() as u32);
         self.queue.mark_slot_consumed(slot)
     }
 
@@ -447,7 +450,6 @@ impl<'a> YCFutexQueue<'a> {
         &mut self,
         slots: Vec<YCQueueConsumeSlot<'a>>,
     ) -> Result<(), YCQueueError> {
-        debug_assert!(self.count.load(Ordering::Relaxed) <= self.queue.capacity() as u32);
         self.queue.mark_slots_consumed(slots)
     }
 }
@@ -559,7 +561,7 @@ mod tests {
         futex_queue
             .mark_slots_produced(slots)
             .expect("produce full queue");
-        assert_eq!(futex_queue.count.load(Ordering::Relaxed), slot_count as u32);
+        assert_eq!(futex_queue.count.load(Ordering::Relaxed), slot_count as i32);
 
         assert_eq!(
             futex_queue
