@@ -206,7 +206,8 @@ fn run_mutex_vecdeque(args: &Args, slot_size: u16, default_message: &str) -> Dur
                     // Build message buffer
                     let mut buf = vec![0u8; slot_size as usize];
                     if args.msg_check_len > 0 {
-                        for (i, dst) in buf.iter_mut().enumerate().take(args.msg_check_len as usize) {
+                        for (i, dst) in buf.iter_mut().enumerate().take(args.msg_check_len as usize)
+                        {
                             let b =
                                 PATTERN.as_bytes()[(messages_sent as usize + i) % PATTERN.len()];
                             *dst = b;
