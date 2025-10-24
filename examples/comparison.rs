@@ -5,8 +5,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 use test_support::utils::{align_to_cache_line, copy_str_to_slice, str_from_u8};
 use yep_coc::{
-    queue_alloc_helpers::{YCQueueOwnedData, YCQueueSharedData},
     YCQueue, YCQueueError,
+    queue_alloc_helpers::{YCQueueOwnedData, YCQueueSharedData},
 };
 
 const PATTERN: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -68,8 +68,8 @@ fn run_ycqueue(args: &Args, slot_size: u16, default_message: &str) -> Duration {
                                     );
                                 }
                             }
-                        } 
-                        
+                        }
+
                         if args.verbose {
                             let s = str_from_u8(consume_slot.data);
                             println!("YCQueue recv: {s}");
@@ -92,38 +92,38 @@ fn run_ycqueue(args: &Args, slot_size: u16, default_message: &str) -> Duration {
             let start_time = Arc::clone(&start_time);
             s.spawn(move || {
                 *start_time.lock().unwrap() = Some(Instant::now());
-            let mut messages_sent = 0u32;
-            while messages_sent < args.msg_count {
-                if producer_queue.in_flight_count() >= args.in_flight_count {
-                    thread::yield_now();
-                    continue;
-                }
-
-                match producer_queue.get_produce_slot() {
-                    Ok(produce_slot) => {
-                        if args.msg_check_len > 0 {
-                            for i in 0..args.msg_check_len as usize {
-                                let b = PATTERN.as_bytes()
-                                    [(messages_sent as usize + i) % PATTERN.len()];
-                                produce_slot.data[i] = b;
-                            }
-                        } else {
-                            copy_str_to_slice(default_message, produce_slot.data);
-                        }
-
-                        if args.verbose {
-                            println!("YCQueue send: {}", str_from_u8(produce_slot.data));
-                        }
-
-                        producer_queue.mark_slot_produced(produce_slot).unwrap();
-                        messages_sent += 1;
-                    }
-                    Err(YCQueueError::OutOfSpace) | Err(YCQueueError::SlotNotReady) => {
+                let mut messages_sent = 0u32;
+                while messages_sent < args.msg_count {
+                    if producer_queue.in_flight_count() >= args.in_flight_count {
                         thread::yield_now();
+                        continue;
                     }
-                    Err(e) => panic!("YCQueue producer error: {e:?}"),
+
+                    match producer_queue.get_produce_slot() {
+                        Ok(produce_slot) => {
+                            if args.msg_check_len > 0 {
+                                for i in 0..args.msg_check_len as usize {
+                                    let b = PATTERN.as_bytes()
+                                        [(messages_sent as usize + i) % PATTERN.len()];
+                                    produce_slot.data[i] = b;
+                                }
+                            } else {
+                                copy_str_to_slice(default_message, produce_slot.data);
+                            }
+
+                            if args.verbose {
+                                println!("YCQueue send: {}", str_from_u8(produce_slot.data));
+                            }
+
+                            producer_queue.mark_slot_produced(produce_slot).unwrap();
+                            messages_sent += 1;
+                        }
+                        Err(YCQueueError::OutOfSpace) | Err(YCQueueError::SlotNotReady) => {
+                            thread::yield_now();
+                        }
+                        Err(e) => panic!("YCQueue producer error: {e:?}"),
+                    }
                 }
-            }
             });
         }
     });
@@ -169,8 +169,8 @@ fn run_mutex_vecdeque(args: &Args, slot_size: u16, default_message: &str) -> Dur
                                     );
                                 }
                             }
-                        } 
-                        
+                        }
+
                         if args.verbose {
                             // Interpret up to first zero
                             let s = str_from_u8(&buf);
@@ -195,7 +195,8 @@ fn run_mutex_vecdeque(args: &Args, slot_size: u16, default_message: &str) -> Dur
                     // Enforce in-flight limit using current queue length
                     let can_send = {
                         let q = queue.lock().unwrap();
-                        q.len() < args.in_flight_count as usize && q.len() < args.queue_depth as usize
+                        q.len() < args.in_flight_count as usize
+                            && q.len() < args.queue_depth as usize
                     };
 
                     if !can_send {
@@ -207,8 +208,8 @@ fn run_mutex_vecdeque(args: &Args, slot_size: u16, default_message: &str) -> Dur
                     let mut buf = vec![0u8; slot_size as usize];
                     if args.msg_check_len > 0 {
                         for i in 0..args.msg_check_len as usize {
-                            let b = PATTERN.as_bytes()
-                                [(messages_sent as usize + i) % PATTERN.len()];
+                            let b =
+                                PATTERN.as_bytes()[(messages_sent as usize + i) % PATTERN.len()];
                             buf[i] = b;
                         }
                     } else {
@@ -262,8 +263,14 @@ fn main() {
     let mv_dur = run_mutex_vecdeque(&args, slot_size, default_message);
 
     println!("\nResults (lower is better):");
-    println!("  YCQueue:          {:.3} us", yc_dur.as_nanos() as f64 / 1_000.0);
-    println!("  Mutex+VecDeque:   {:.3} us", mv_dur.as_nanos() as f64 / 1_000.0);
+    println!(
+        "  YCQueue:          {:.3} us",
+        yc_dur.as_nanos() as f64 / 1_000.0
+    );
+    println!(
+        "  Mutex+VecDeque:   {:.3} us",
+        mv_dur.as_nanos() as f64 / 1_000.0
+    );
 
     let yc_msgs_per_sec = (args.msg_count as f64) / yc_dur.as_secs_f64();
     let mv_msgs_per_sec = (args.msg_count as f64) / mv_dur.as_secs_f64();
