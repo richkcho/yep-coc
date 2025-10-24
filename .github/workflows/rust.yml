@@ -9,6 +9,12 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      branch_to_run:
+        description: 'Branch to run the workflow on'
+        required: false
+        default: 'main'
+        type: string
 
 env:
   CARGO_TERM_COLOR: always
@@ -22,6 +28,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ (github.event_name == 'workflow_dispatch' && inputs.branch_to_run) || (github.event_name == 'pull_request' && github.head_ref) || github.ref_name }}
       - name: Install toolchain components
         run: rustup component add rustfmt clippy
       - name: Check formatting
