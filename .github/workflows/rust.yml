@@ -30,6 +30,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ (github.event_name == 'workflow_dispatch' && inputs.branch_to_run) || (github.event_name == 'pull_request' && github.head_ref) || github.ref_name }}
+      - name: Update to latest stable Rust
+        run: rustup update stable
       - name: Install toolchain components
         run: rustup component add rustfmt clippy
       - name: Check formatting
