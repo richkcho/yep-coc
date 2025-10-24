@@ -177,8 +177,6 @@ fn run_mutex_vecdeque(args: &Args, slot_size: u16, default_message: &str) -> Dur
                             println!("Mutex+VecDeque recv: {s}");
                         }
                         messages_received += 1;
-                    } else {
-                        thread::yield_now();
                     }
                 }
                 *end_time.lock().unwrap() = Some(Instant::now());
@@ -227,9 +225,6 @@ fn run_mutex_vecdeque(args: &Args, slot_size: u16, default_message: &str) -> Dur
                         if q.len() < args.queue_depth as usize {
                             q.push_back(buf);
                             messages_sent += 1;
-                        } else {
-                            // Lost race: became full after check; yield and retry
-                            thread::yield_now();
                         }
                     }
                 }
