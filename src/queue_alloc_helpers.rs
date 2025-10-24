@@ -1,6 +1,6 @@
 cfg_if::cfg_if! {
     if #[cfg(feature = "futex")] {
-        use std::sync::atomic::AtomicU32;
+        use std::sync::atomic::AtomicI32;
         use crate::YCFutexQueue;
     }
 }
@@ -140,14 +140,14 @@ impl<'a> YCQueue<'a> {
 #[derive(Debug)]
 pub struct YCFutexQueueOwnedData {
     pub data: YCQueueOwnedData,
-    pub count: AtomicU32,
+    pub count: AtomicI32,
 }
 
 #[cfg(feature = "futex")]
 impl YCFutexQueueOwnedData {
     pub fn new(slot_count_u16: u16, slot_size_u16: u16) -> YCFutexQueueOwnedData {
         let data = YCQueueOwnedData::new(slot_count_u16, slot_size_u16);
-        let count = AtomicU32::new(0);
+        let count = AtomicI32::new(0);
 
         YCFutexQueueOwnedData { data, count }
     }
@@ -157,7 +157,7 @@ impl YCFutexQueueOwnedData {
 #[derive(Debug)]
 pub struct YCFutexQueueSharedData<'a> {
     pub data: YCQueueSharedData<'a>,
-    pub count: &'a AtomicU32,
+    pub count: &'a AtomicI32,
 }
 
 #[cfg(feature = "futex")]

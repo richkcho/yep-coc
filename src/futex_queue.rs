@@ -47,7 +47,7 @@ impl<'a> YCFutexQueue<'a> {
     /// assert_eq!(futex.count.load(Ordering::Relaxed), 0);
     /// # }
     /// ```
-    pub fn new(queue: YCQueue<'a>, count: &'a AtomicU32) -> Self {
+    pub fn new(queue: YCQueue<'a>, count: &'a AtomicI32) -> Self {
         YCFutexQueue { queue, count }
     }
 
