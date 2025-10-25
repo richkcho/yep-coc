@@ -1036,4 +1036,62 @@ mod tests {
         );
         assert_eq!(queue.in_flight_count(), 0);
     }
+
+    #[test]
+    fn batched_produce_consume_crossing_word_boundaries() {
+        let slot_count: u16 = 128;
+        let slot_size: u16 = 16;
+        let batch_size: u16 = 67;
+        let iterations = 5;
+
+        let owned = YCQueueOwnedData::new(slot_count, slot_size);
+        let mut queue = YCQueue::from_owned_data(&owned).unwrap();
+
+        assert_eq!(
+            queue.check_owner(0, slot_count, YCQueueOwner::Producer),
+            slot_count
+        );
+        assert_eq!(queue.in_flight_count(), 0);
+        assert_eq!(queue.produce_idx(), 0);
+        assert_eq!(queue.consume_idx(), 0);
+
+        for iteration in 0..iterations {
+            let expected_start = ((batch_size as usize * iteration) % slot_count as usize) as u16;
+            assert_eq!(queue.produce_idx(), expected_start);
+
+            let produce_slots = queue.get_produce_slots(batch_size, false).unwrap();
+            assert_eq!(produce_slots.len(), batch_size as usize);
+            assert_eq!(produce_slots[0].index, expected_start);
+
+            for (offset, slot) in produce_slots.iter().enumerate() {
+                let expected_index =
+                    ((expected_start as usize + offset) % slot_count as usize) as u16;
+                assert_eq!(slot.index, expected_index);
+            }
+
+            queue.mark_slots_produced(produce_slots).unwrap();
+            assert_eq!(queue.in_flight_count(), batch_size);
+
+            let consume_slots = queue.get_consume_slots(batch_size, false).unwrap();
+            assert_eq!(consume_slots.len(), batch_size as usize);
+
+            for (offset, slot) in consume_slots.iter().enumerate() {
+                let expected_index =
+                    ((expected_start as usize + offset) % slot_count as usize) as u16;
+                assert_eq!(slot.index, expected_index);
+            }
+
+            queue.mark_slots_consumed(consume_slots).unwrap();
+
+            let expected_idx =
+                ((batch_size as usize * (iteration + 1)) % slot_count as usize) as u16;
+            assert_eq!(queue.in_flight_count(), 0);
+            assert_eq!(queue.produce_idx(), expected_idx);
+            assert_eq!(queue.consume_idx(), expected_idx);
+            assert_eq!(
+                queue.check_owner(0, slot_count, YCQueueOwner::Producer),
+                slot_count
+            );
+        }
+    }
 }
