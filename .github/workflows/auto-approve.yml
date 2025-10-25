@@ -1,0 +1,32 @@
+name: Auto-approve
+
+# This workflow auto-approves PRs created by the repository owner.
+# 
+# IMPORTANT: This requires a Personal Access Token (PAT) to be set up as a repository secret named PAT_TOKEN.
+# The PAT must have 'repo' scope and should ideally belong to a dedicated bot account.
+# 
+# Why PAT is needed:
+# GitHub's GITHUB_TOKEN has a security restriction that prevents it from approving pull requests
+# in workflows triggered by pull_request or pull_request_target events in some repository configurations.
+# Using a PAT from a separate account (like a bot) bypasses this restriction.
+#
+# Setup instructions:
+# 1. Create a GitHub account for a bot user (or use an existing bot account)
+# 2. Generate a PAT with 'repo' scope for that account
+# 3. Add the PAT as a repository secret named PAT_TOKEN in Settings > Secrets and variables > Actions
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  auto-approve:
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.user.login == github.repository_owner
+    steps:
+      - uses: hmarr/auto-approve-action@v4
+        with:
+          github-token: ${{ secrets.PAT_TOKEN }}
