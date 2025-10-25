@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod multi_thread_tests {
     use std::collections::HashSet;
-    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
 
     use yep_coc::queue_alloc_helpers::{YCQueueOwnedData, YCQueueSharedData};
@@ -504,5 +504,201 @@ mod multi_thread_tests {
                 "missing received id {id}",
             );
         }
+    }
+
+    #[test]
+    fn mixed_batch_producers_consumers() {
+        let slot_count: u16 = 128;
+        let slot_size: u16 = 16;
+        let large_batch: u16 = 67;
+        let reservations_per_thread: usize = 10;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+
+        let owned_data = YCQueueOwnedData::new(slot_count, slot_size);
+
+        let producer_large_queue = {
+            let shared = YCQueueSharedData::from_owned_data(&owned_data);
+            YCQueue::new(shared.meta, shared.data).unwrap()
+        };
+        let producer_small_queue = {
+            let shared = YCQueueSharedData::from_owned_data(&owned_data);
+            YCQueue::new(shared.meta, shared.data).unwrap()
+        };
+        let consumer_large_queue = {
+            let shared = YCQueueSharedData::from_owned_data(&owned_data);
+            YCQueue::new(shared.meta, shared.data).unwrap()
+        };
+        let consumer_small_queue = {
+            let shared = YCQueueSharedData::from_owned_data(&owned_data);
+            YCQueue::new(shared.meta, shared.data).unwrap()
+        };
+
+        let total_messages = reservations_per_thread * ((large_batch as usize) + 1);
+        let consumed_total = Arc::new(AtomicUsize::new(0));
+        let large_batches_consumed = Arc::new(AtomicUsize::new(0));
+
+        std::thread::scope(|s| {
+            // large batch producer
+            let builder = std::thread::Builder::new().name("producer_large".to_string());
+            let mut produce_queue = producer_large_queue;
+            builder
+                .spawn_scoped(s, move || {
+                    let mut reservations = 0usize;
+                    while reservations < reservations_per_thread {
+                        match produce_queue.get_produce_slots(large_batch, false) {
+                            Ok(mut slots) => {
+                                for slot in slots.iter_mut() {
+                                    slot.data.fill(slot.index as u8);
+                                }
+                                produce_queue.mark_slots_produced(slots).unwrap();
+                                reservations += 1;
+                            }
+                            Err(YCQueueError::OutOfSpace) | Err(YCQueueError::SlotNotReady) => {
+                                std::thread::yield_now();
+                            }
+                            Err(e) => panic!("unexpected error producing batch: {e:?}"),
+                        }
+
+                        if std::time::Instant::now() > deadline {
+                            panic!("large producer timed out");
+                        }
+                    }
+                })
+                .unwrap();
+
+            // single-slot producer
+            let builder = std::thread::Builder::new().name("producer_small".to_string());
+            let mut produce_queue = producer_small_queue;
+            builder
+                .spawn_scoped(s, move || {
+                    let mut reservations = 0usize;
+                    while reservations < reservations_per_thread {
+                        match produce_queue.get_produce_slot() {
+                            Ok(slot) => {
+                                slot.data.fill(slot.index as u8);
+                                produce_queue.mark_slot_produced(slot).unwrap();
+                                reservations += 1;
+                            }
+                            Err(YCQueueError::OutOfSpace) | Err(YCQueueError::SlotNotReady) => {
+                                std::thread::yield_now();
+                            }
+                            Err(e) => panic!("unexpected error producing single slot: {e:?}"),
+                        }
+
+                        if std::time::Instant::now() > deadline {
+                            panic!("small producer timed out");
+                        }
+                    }
+                })
+                .unwrap();
+
+            // large batch consumer
+            let builder = std::thread::Builder::new().name("consumer_large".to_string());
+            let mut consume_queue = consumer_large_queue;
+            let consumed_total_clone = Arc::clone(&consumed_total);
+            let large_batches_clone = Arc::clone(&large_batches_consumed);
+            builder
+                .spawn_scoped(s, move || {
+                    loop {
+                        if consumed_total_clone.load(Ordering::Acquire) >= total_messages {
+                            break;
+                        }
+
+                        match consume_queue.get_consume_slots(large_batch, false) {
+                            Ok(slots) => {
+                                for slot in slots.iter() {
+                                    let value = slot.data.first().copied().unwrap();
+                                    assert_eq!(value, slot.index as u8);
+                                }
+                                consume_queue.mark_slots_consumed(slots).unwrap();
+                                large_batches_clone.fetch_add(1, Ordering::AcqRel);
+                                let count = large_batch as usize;
+                                let prev = consumed_total_clone.fetch_add(count, Ordering::AcqRel);
+                                assert!(prev + count <= total_messages);
+                            }
+                            Err(YCQueueError::EmptyQueue) | Err(YCQueueError::SlotNotReady) => {
+                                match consume_queue.get_consume_slot() {
+                                    Ok(slot) => {
+                                        let value = slot.data.first().copied().unwrap();
+                                        assert_eq!(value, slot.index as u8);
+                                        consume_queue.mark_slot_consumed(slot).unwrap();
+                                        let prev =
+                                            consumed_total_clone.fetch_add(1, Ordering::AcqRel);
+                                        assert!(prev < total_messages);
+                                    }
+                                    Err(YCQueueError::EmptyQueue)
+                                    | Err(YCQueueError::SlotNotReady) => {
+                                        std::thread::yield_now();
+                                    }
+                                    Err(e) => {
+                                        panic!("unexpected error consuming single slot: {e:?}")
+                                    }
+                                }
+                            }
+                            Err(e) => panic!("unexpected error consuming batch: {e:?}"),
+                        }
+
+                        if std::time::Instant::now() > deadline {
+                            panic!("large consumer timed out");
+                        }
+                    }
+                })
+                .unwrap();
+
+            // single-slot consumer
+            let builder = std::thread::Builder::new().name("consumer_small".to_string());
+            let mut consume_queue = consumer_small_queue;
+            let consumed_total_clone = Arc::clone(&consumed_total);
+            let large_batches_clone = Arc::clone(&large_batches_consumed);
+            builder
+                .spawn_scoped(s, move || {
+                    loop {
+                        if consumed_total_clone.load(Ordering::Acquire) >= total_messages {
+                            break;
+                        }
+
+                        if large_batches_clone.load(Ordering::Acquire) == 0 {
+                            if std::time::Instant::now() > deadline {
+                                panic!("small consumer timed out before first batch");
+                            }
+                            std::thread::yield_now();
+                            continue;
+                        }
+
+                        match consume_queue.get_consume_slot() {
+                            Ok(slot) => {
+                                let value = slot.data.first().copied().unwrap();
+                                assert_eq!(value, slot.index as u8);
+                                consume_queue.mark_slot_consumed(slot).unwrap();
+                                let prev = consumed_total_clone.fetch_add(1, Ordering::AcqRel);
+                                assert!(prev < total_messages);
+                            }
+                            Err(YCQueueError::EmptyQueue) | Err(YCQueueError::SlotNotReady) => {
+                                std::thread::yield_now();
+                            }
+                            Err(e) => panic!("unexpected error consuming single slot: {e:?}"),
+                        }
+
+                        if std::time::Instant::now() > deadline {
+                            panic!("small consumer timed out");
+                        }
+                    }
+                })
+                .unwrap();
+        });
+
+        assert_eq!(
+            consumed_total.load(Ordering::Acquire),
+            total_messages,
+            "did not consume all produced messages"
+        );
+        assert!(
+            large_batches_consumed.load(Ordering::Acquire) > 0,
+            "large consumer never completed a batch"
+        );
+
+        let final_queue = YCQueue::from_owned_data(&owned_data).unwrap();
+        assert_eq!(final_queue.in_flight_count(), 0);
+        assert_eq!(final_queue.produce_idx(), final_queue.consume_idx());
     }
 }
