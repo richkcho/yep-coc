@@ -28,7 +28,7 @@ struct Args {
     msg_check_len: u16,
 
     /// Total number of messages to send
-    #[arg(short = 'n', long, default_value = "100")]
+    #[arg(short = 'n', long, default_value = "10000")]
     msg_count: u32,
 
     /// Enable verbose logging
@@ -238,6 +238,87 @@ fn run_mutex_vecdeque(args: &Args, slot_size: u16, default_message: &str) -> Dur
     end.duration_since(start)
 }
 
+fn run_flume(args: &Args, slot_size: u16, default_message: &str) -> Duration {
+    let (sender, receiver) = flume::bounded::<Vec<u8>>(args.queue_depth as usize);
+
+    let start_time: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
+    let end_time: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
+
+    thread::scope(|s| {
+        {
+            let receiver = receiver.clone();
+            let args = args.clone();
+            let end_time = Arc::clone(&end_time);
+            s.spawn(move || {
+                let mut messages_received = 0u32;
+                while messages_received < args.msg_count {
+                    let buf = receiver.recv().expect("Flume channel closed");
+
+                    if args.msg_check_len > 0 {
+                        for (i, got) in buf.iter().enumerate().take(args.msg_check_len as usize) {
+                            let expected = PATTERN.as_bytes()
+                                [(messages_received as usize + i) % PATTERN.len()];
+                            if expected != *got {
+                                panic!(
+                                    "Flume mismatch at message {}, byte {}: expected '{}' got '{}'",
+                                    messages_received, i, expected, got
+                                );
+                            }
+                        }
+                    }
+
+                    if args.verbose {
+                        let s = str_from_u8(&buf);
+                        println!("Flume recv: {s}");
+                    }
+
+                    messages_received += 1;
+                }
+                *end_time.lock().unwrap() = Some(Instant::now());
+            });
+        }
+
+        {
+            let sender = sender.clone();
+            let args = args.clone();
+            let start_time = Arc::clone(&start_time);
+            s.spawn(move || {
+                *start_time.lock().unwrap() = Some(Instant::now());
+                let mut messages_sent = 0u32;
+                while messages_sent < args.msg_count {
+                    if sender.len() >= args.in_flight_count as usize {
+                        thread::yield_now();
+                        continue;
+                    }
+
+                    let mut buf = vec![0u8; slot_size as usize];
+                    if args.msg_check_len > 0 {
+                        for (i, dst) in buf.iter_mut().enumerate().take(args.msg_check_len as usize)
+                        {
+                            let b =
+                                PATTERN.as_bytes()[(messages_sent as usize + i) % PATTERN.len()];
+                            *dst = b;
+                        }
+                    } else {
+                        copy_str_to_slice(default_message, &mut buf);
+                    }
+
+                    if args.verbose {
+                        println!("Flume send: {}", str_from_u8(&buf));
+                    }
+
+                    sender.send(buf).expect("Flume channel closed");
+                    messages_sent += 1;
+                }
+            });
+        }
+    });
+
+    let start = start_time.lock().unwrap().unwrap();
+    let end = end_time.lock().unwrap().unwrap();
+    end.duration_since(start)
+}
+
 fn main() {
     let default_message = "hello there";
     let args = Args::parse();
@@ -261,6 +342,7 @@ fn main() {
 
     let yc_dur = run_ycqueue(&args, slot_size, default_message);
     let mv_dur = run_mutex_vecdeque(&args, slot_size, default_message);
+    let flume_dur = run_flume(&args, slot_size, default_message);
 
     println!("\nResults (lower is better):");
     println!(
@@ -271,10 +353,16 @@ fn main() {
         "  Mutex+VecDeque:   {:.3} us",
         mv_dur.as_nanos() as f64 / 1_000.0
     );
+    println!(
+        "  Flume (bounded):  {:.3} us",
+        flume_dur.as_nanos() as f64 / 1_000.0
+    );
 
     let yc_msgs_per_sec = (args.msg_count as f64) / yc_dur.as_secs_f64();
     let mv_msgs_per_sec = (args.msg_count as f64) / mv_dur.as_secs_f64();
+    let flume_msgs_per_sec = (args.msg_count as f64) / flume_dur.as_secs_f64();
     println!("\nThroughput:");
     println!("  YCQueue:          {:.2} msgs/s", yc_msgs_per_sec);
     println!("  Mutex+VecDeque:   {:.2} msgs/s", mv_msgs_per_sec);
+    println!("  Flume (bounded):  {:.2} msgs/s", flume_msgs_per_sec);
 }
