@@ -7,7 +7,7 @@ readme = "README.md"
 repository = "https://github.com/richkcho/yep-coc"
 keywords = ["circular", "queue", "zero-copy", "mpmc", "lock-free"]
 categories = ["concurrency", "data-structures"]
-license = "GPL-2.0-or-later"
+license = "LGPL-2.1-or-later"
 
 [workspace]
 members = ["test_support"]
