@@ -332,8 +332,8 @@ fn run_mutex_vecdeque(args: &Args, slot_size: u16, default_message: &str) -> Dur
                             buf[..INDEX_PREFIX_LEN].copy_from_slice(&msg_index.to_le_bytes());
 
                             for i in 0..validation_len.saturating_sub(INDEX_PREFIX_LEN) {
-                                let b = PATTERN.as_bytes()
-                                    [(msg_index as usize + i) % PATTERN.len()];
+                                let b =
+                                    PATTERN.as_bytes()[(msg_index as usize + i) % PATTERN.len()];
                                 buf[INDEX_PREFIX_LEN + i] = b;
                             }
                         } else {
@@ -446,7 +446,9 @@ fn run_mutex_vecdeque(args: &Args, slot_size: u16, default_message: &str) -> Dur
             }
 
             if seen[index as usize] {
-                panic!("Mutex+VecDeque: Duplicate message index {index} detected during validation");
+                panic!(
+                    "Mutex+VecDeque: Duplicate message index {index} detected during validation"
+                );
             }
             seen[index as usize] = true;
 
@@ -464,7 +466,9 @@ fn run_mutex_vecdeque(args: &Args, slot_size: u16, default_message: &str) -> Dur
         }
 
         if seen.iter().any(|received| !received) {
-            panic!("Mutex+VecDeque: Not all expected message indices were observed during validation");
+            panic!(
+                "Mutex+VecDeque: Not all expected message indices were observed during validation"
+            );
         }
     }
 
@@ -530,8 +534,8 @@ fn run_flume(args: &Args, slot_size: u16, default_message: &str) -> Duration {
                             buf[..INDEX_PREFIX_LEN].copy_from_slice(&msg_index.to_le_bytes());
 
                             for i in 0..validation_len.saturating_sub(INDEX_PREFIX_LEN) {
-                                let b = PATTERN.as_bytes()
-                                    [(msg_index as usize + i) % PATTERN.len()];
+                                let b =
+                                    PATTERN.as_bytes()[(msg_index as usize + i) % PATTERN.len()];
                                 buf[INDEX_PREFIX_LEN + i] = b;
                             }
                         } else {
