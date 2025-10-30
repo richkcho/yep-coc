@@ -9,6 +9,12 @@ use yep_coc::{
     queue_alloc_helpers::{YCQueueOwnedData, YCQueueSharedData},
 };
 
+#[cfg(feature = "futex")]
+use yep_coc::{
+    YCFutexQueue,
+    queue_alloc_helpers::{YCFutexQueueOwnedData, YCFutexQueueSharedData},
+};
+
 const PATTERN: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 
 /// Compare single-producer/single-consumer performance between YCQueue and Mutex+VecDeque.
@@ -135,6 +141,125 @@ fn run_ycqueue(args: &Args, slot_size: u16, default_message: &str) -> Duration {
                             thread::yield_now();
                         }
                         Err(e) => panic!("YCQueue producer error: {e:?}"),
+                    }
+                }
+            });
+        }
+    });
+
+    let start = start_time.lock().unwrap().unwrap();
+    let end = end_time.lock().unwrap().unwrap();
+    end.duration_since(start)
+}
+
+#[cfg(feature = "futex")]
+fn run_ycfutexqueue(args: &Args, slot_size: u16, default_message: &str) -> Duration {
+    let owned_data = YCFutexQueueOwnedData::new(args.queue_depth, slot_size);
+    let consumer_data = YCFutexQueueSharedData::from_owned_data(&owned_data);
+    let producer_data = YCFutexQueueSharedData::from_owned_data(&owned_data);
+
+    let mut consumer_queue = YCFutexQueue::new(
+        YCQueue::new(consumer_data.data.meta, consumer_data.data.data).unwrap(),
+        consumer_data.count,
+    );
+    let mut producer_queue = YCFutexQueue::new(
+        YCQueue::new(producer_data.data.meta, producer_data.data.data).unwrap(),
+        producer_data.count,
+    );
+
+    let start_time: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
+    let end_time: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
+
+    // Create barrier to synchronize both threads before starting benchmark
+    let barrier = Arc::new(Barrier::new(2));
+
+    let timeout = Duration::from_millis(1);
+
+    thread::scope(|s| {
+        {
+            let end_time = Arc::clone(&end_time);
+            let barrier = Arc::clone(&barrier);
+            s.spawn(move || {
+                // Wait for both threads to be ready
+                barrier.wait();
+
+                let mut messages_received = 0u32;
+                while messages_received < args.msg_count {
+                    match consumer_queue.get_consume_slot(timeout, Duration::ZERO) {
+                        Ok(consume_slot) => {
+                            // Optional validation
+                            if args.msg_check_len > 0 {
+                                for i in 0..args.msg_check_len as usize {
+                                    let expected = PATTERN.as_bytes()
+                                        [(messages_received as usize + i) % PATTERN.len()];
+                                    let got = consume_slot.data[i];
+                                    if expected != got {
+                                        panic!(
+                                            "YCFutexQueue mismatch at message {}, byte {}: expected '{}' got '{}'",
+                                            messages_received, i, expected, got
+                                        );
+                                    }
+                                }
+                            }
+
+                            if args.verbose {
+                                let s = str_from_u8(consume_slot.data);
+                                println!("YCFutexQueue recv: {s}");
+                            }
+
+                            consumer_queue.mark_slot_consumed(consume_slot).unwrap();
+                            messages_received += 1;
+                        }
+                        Err(YCQueueError::Timeout) => {
+                            thread::yield_now();
+                        }
+                        Err(e) => panic!("YCFutexQueue consumer error: {e:?}"),
+                    }
+                }
+                *end_time.lock().unwrap() = Some(Instant::now());
+            });
+        }
+
+        {
+            let start_time = Arc::clone(&start_time);
+            let barrier = Arc::clone(&barrier);
+            s.spawn(move || {
+                // Wait for both threads to be ready
+                barrier.wait();
+
+                // Producer thread sets the start time after barrier
+                *start_time.lock().unwrap() = Some(Instant::now());
+
+                let mut messages_sent = 0u32;
+                while messages_sent < args.msg_count {
+                    if producer_queue.queue.in_flight_count() >= args.in_flight_count {
+                        thread::yield_now();
+                        continue;
+                    }
+
+                    match producer_queue.get_produce_slot(timeout, Duration::ZERO) {
+                        Ok(produce_slot) => {
+                            if args.msg_check_len > 0 {
+                                for i in 0..args.msg_check_len as usize {
+                                    let b = PATTERN.as_bytes()
+                                        [(messages_sent as usize + i) % PATTERN.len()];
+                                    produce_slot.data[i] = b;
+                                }
+                            } else {
+                                copy_str_to_slice(default_message, produce_slot.data);
+                            }
+
+                            if args.verbose {
+                                println!("YCFutexQueue send: {}", str_from_u8(produce_slot.data));
+                            }
+
+                            producer_queue.mark_slot_produced(produce_slot).unwrap();
+                            messages_sent += 1;
+                        }
+                        Err(YCQueueError::Timeout) => {
+                            thread::yield_now();
+                        }
+                        Err(e) => panic!("YCFutexQueue producer error: {e:?}"),
                     }
                 }
             });
@@ -380,28 +505,39 @@ fn main() {
     }
 
     let yc_dur = run_ycqueue(&args, slot_size, default_message);
-    let mv_dur = run_mutex_vecdeque(&args, slot_size, default_message);
+    #[cfg(feature = "futex")]
+    let ycf_dur = run_ycfutexqueue(&args, slot_size, default_message);
     let flume_dur = run_flume(&args, slot_size, default_message);
+    let mv_dur = run_mutex_vecdeque(&args, slot_size, default_message);
 
     println!("\nResults (lower is better):");
     println!(
         "  YCQueue:          {:.3} us",
         yc_dur.as_nanos() as f64 / 1_000.0
     );
+    #[cfg(feature = "futex")]
     println!(
-        "  Mutex+VecDeque:   {:.3} us",
-        mv_dur.as_nanos() as f64 / 1_000.0
+        "  YCFutexQueue:     {:.3} us",
+        ycf_dur.as_nanos() as f64 / 1_000.0
     );
     println!(
         "  Flume (bounded):  {:.3} us",
         flume_dur.as_nanos() as f64 / 1_000.0
     );
+    println!(
+        "  Mutex+VecDeque:   {:.3} us",
+        mv_dur.as_nanos() as f64 / 1_000.0
+    );
 
     let yc_msgs_per_sec = (args.msg_count as f64) / yc_dur.as_secs_f64();
-    let mv_msgs_per_sec = (args.msg_count as f64) / mv_dur.as_secs_f64();
+    #[cfg(feature = "futex")]
+    let ycf_msgs_per_sec = (args.msg_count as f64) / ycf_dur.as_secs_f64();
     let flume_msgs_per_sec = (args.msg_count as f64) / flume_dur.as_secs_f64();
+    let mv_msgs_per_sec = (args.msg_count as f64) / mv_dur.as_secs_f64();
     println!("\nThroughput:");
     println!("  YCQueue:          {:.2} msgs/s", yc_msgs_per_sec);
-    println!("  Mutex+VecDeque:   {:.2} msgs/s", mv_msgs_per_sec);
+    #[cfg(feature = "futex")]
+    println!("  YCFutexQueue:     {:.2} msgs/s", ycf_msgs_per_sec);
     println!("  Flume (bounded):  {:.2} msgs/s", flume_msgs_per_sec);
+    println!("  Mutex+VecDeque:   {:.2} msgs/s", mv_msgs_per_sec);
 }
