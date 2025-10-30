@@ -377,7 +377,10 @@ fn run_ycblockingqueue(args: &Args, slot_size: u16, default_message: &str) -> Du
                             }
 
                             if args.verbose {
-                                println!("YCBlockingQueue send: {}", str_from_u8(produce_slot.data));
+                                println!(
+                                    "YCBlockingQueue send: {}",
+                                    str_from_u8(produce_slot.data)
+                                );
                             }
 
                             producer_queue.mark_slot_produced(produce_slot).unwrap();

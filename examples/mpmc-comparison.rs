@@ -749,7 +749,9 @@ fn run_ycblockingqueue(args: &Args, slot_size: u16, default_message: &str) -> Du
             }
 
             if seen[index as usize] {
-                panic!("YCBlockingQueue: Duplicate message index {index} detected during validation");
+                panic!(
+                    "YCBlockingQueue: Duplicate message index {index} detected during validation"
+                );
             }
             seen[index as usize] = true;
 

@@ -99,20 +99,20 @@ impl<'a> YCBlockingQueue<'a> {
             let count_guard = self.count.lock().unwrap();
             let capacity = self.queue.capacity() as i32;
             let min_required_space = if best_effort { 1 } else { num_slots as i32 };
-            
+
             // Calculate remaining timeout
             let remaining_timeout = match timeout.checked_sub(start_time.elapsed()) {
                 Some(t) => t,
                 None => return Err(YCQueueError::Timeout),
             };
-            
+
             let (count_guard, timeout_result) = self
                 .condvar
                 .wait_timeout_while(count_guard, remaining_timeout, |count| {
                     (capacity - *count) < min_required_space
                 })
                 .unwrap();
-            
+
             if timeout_result.timed_out() {
                 return Err(YCQueueError::Timeout);
             }
@@ -218,20 +218,20 @@ impl<'a> YCBlockingQueue<'a> {
             // Wait until enough data is available
             let count_guard = self.count.lock().unwrap();
             let min_required_count = if best_effort { 1 } else { num_slots as i32 };
-            
+
             // Calculate remaining timeout
             let remaining_timeout = match timeout.checked_sub(start_time.elapsed()) {
                 Some(t) => t,
                 None => return Err(YCQueueError::Timeout),
             };
-            
+
             let (count_guard, timeout_result) = self
                 .condvar
                 .wait_timeout_while(count_guard, remaining_timeout, |count| {
                     *count < min_required_count
                 })
                 .unwrap();
-            
+
             if timeout_result.timed_out() {
                 return Err(YCQueueError::Timeout);
             }
