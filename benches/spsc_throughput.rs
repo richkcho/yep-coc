@@ -1,3 +1,29 @@
+//! SPSC Queue Throughput Benchmark
+//!
+//! This benchmark measures the steady-state throughput of the YCQueue SPSC (Single Producer
+//! Single Consumer) queue implementation using Criterion.
+//!
+//! # Features
+//! - Thread pinning: Producer and consumer threads are pinned to different CPU cores using
+//!   core_affinity to avoid SMT siblings and reduce cache contention.
+//! - NUMA-aware: Queue allocation happens after thread pinning for proper first-touch allocation.
+//! - Synchronized start: Uses a barrier to ensure both threads start simultaneously, measuring
+//!   only steady-state performance without startup costs.
+//! - Wall-clock timing: Uses iter_custom to measure total elapsed time across both threads.
+//! - Dead code elimination prevention: Uses black_box on data to ensure operations aren't
+//!   optimized away.
+//! - Batch operations: Supports both single-slot and batched produce/consume operations.
+//!
+//! # Parameters Swept
+//! - Capacities: 256, 512, 2048 slots
+//! - Payload sizes: 8, 64, 128 bytes
+//! - Batch sizes: 1, 8, 32 (operations per API call)
+//!
+//! # Configuration
+//! - Measurement time: 3 seconds per benchmark
+//! - Sample size: 20 measurements
+//! - Throughput reported in bytes/second
+
 use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId, Throughput};
 use std::sync::{Arc, Barrier};
 use std::thread;
@@ -258,7 +284,8 @@ fn spsc_throughput_benchmarks(c: &mut Criterion) {
     
     for capacity in &capacities {
         for payload_size in &payload_sizes {
-            // Skip combinations that would overflow
+            // Skip combinations that would overflow in queue allocation
+            // Note: batch_size doesn't affect queue size, only API call batching
             if (*capacity as u32) * (*payload_size as u32) >= 65536 {
                 continue;
             }
