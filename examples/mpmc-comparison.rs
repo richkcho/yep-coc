@@ -1,7 +1,7 @@
 use clap::Parser;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 use test_support::utils::{align_to_cache_line, copy_str_to_slice, str_from_u8};
@@ -81,6 +81,10 @@ fn run_ycqueue(args: &Args, slot_size: u16, default_message: &str) -> Duration {
     let start_time: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
     let end_time: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
 
+    // Create barrier to synchronize all threads before starting benchmark
+    let total_threads = args.producer_threads as usize + args.consumer_threads as usize;
+    let barrier = Arc::new(Barrier::new(total_threads));
+
     thread::scope(|s| {
         let mut next_index = 0u32;
 
@@ -100,8 +104,13 @@ fn run_ycqueue(args: &Args, slot_size: u16, default_message: &str) -> Duration {
             let in_flight_limit = args.in_flight_count;
             let msg_check_len = args.msg_check_len;
             let start_time = Arc::clone(&start_time);
+            let barrier = Arc::clone(&barrier);
 
             s.spawn(move || {
+                // Wait for all threads to be ready
+                barrier.wait();
+
+                // First producer thread sets the start time after barrier
                 if thread_idx == 0 {
                     *start_time.lock().unwrap() = Some(Instant::now());
                 }
@@ -154,8 +163,12 @@ fn run_ycqueue(args: &Args, slot_size: u16, default_message: &str) -> Duration {
             let validation_storage = Arc::clone(&validation_storage);
             let msg_check_len = args.msg_check_len;
             let end_time = Arc::clone(&end_time);
+            let barrier = Arc::clone(&barrier);
 
             s.spawn(move || {
+                // Wait for all threads to be ready
+                barrier.wait();
+
                 let mut local_validations = if msg_check_len > 0 {
                     Vec::with_capacity((msg_count as usize / 2) + 1)
                 } else {
@@ -289,6 +302,10 @@ fn run_mutex_vecdeque(args: &Args, slot_size: u16, default_message: &str) -> Dur
     let start_time: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
     let end_time: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
 
+    // Create barrier to synchronize all threads before starting benchmark
+    let total_threads = args.producer_threads as usize + args.consumer_threads as usize;
+    let barrier = Arc::new(Barrier::new(total_threads));
+
     thread::scope(|s| {
         let mut next_index = 0u32;
 
@@ -306,8 +323,13 @@ fn run_mutex_vecdeque(args: &Args, slot_size: u16, default_message: &str) -> Dur
             let queue = Arc::clone(&queue);
             let args = args.clone();
             let start_time = Arc::clone(&start_time);
+            let barrier = Arc::clone(&barrier);
 
             s.spawn(move || {
+                // Wait for all threads to be ready
+                barrier.wait();
+
+                // First producer thread sets the start time after barrier
                 if thread_idx == 0 {
                     *start_time.lock().unwrap() = Some(Instant::now());
                 }
@@ -364,8 +386,12 @@ fn run_mutex_vecdeque(args: &Args, slot_size: u16, default_message: &str) -> Dur
             let args = args.clone();
             let validation_storage = Arc::clone(&validation_storage);
             let end_time = Arc::clone(&end_time);
+            let barrier = Arc::clone(&barrier);
 
             s.spawn(move || {
+                // Wait for all threads to be ready
+                barrier.wait();
+
                 let mut local_validations = if args.msg_check_len > 0 {
                     Vec::with_capacity((args.msg_count as usize / 2) + 1)
                 } else {
@@ -499,6 +525,10 @@ fn run_flume(args: &Args, slot_size: u16, default_message: &str) -> Duration {
     let start_time: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
     let end_time: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
 
+    // Create barrier to synchronize all threads before starting benchmark
+    let total_threads = args.producer_threads as usize + args.consumer_threads as usize;
+    let barrier = Arc::new(Barrier::new(total_threads));
+
     thread::scope(|s| {
         let mut next_index = 0u32;
 
@@ -516,8 +546,13 @@ fn run_flume(args: &Args, slot_size: u16, default_message: &str) -> Duration {
             let sender = sender.clone();
             let args = args.clone();
             let start_time = Arc::clone(&start_time);
+            let barrier = Arc::clone(&barrier);
 
             s.spawn(move || {
+                // Wait for all threads to be ready
+                barrier.wait();
+
+                // First producer thread sets the start time after barrier
                 if thread_idx == 0 {
                     *start_time.lock().unwrap() = Some(Instant::now());
                 }
@@ -560,8 +595,12 @@ fn run_flume(args: &Args, slot_size: u16, default_message: &str) -> Duration {
             let args = args.clone();
             let validation_storage = Arc::clone(&validation_storage);
             let end_time = Arc::clone(&end_time);
+            let barrier = Arc::clone(&barrier);
 
             s.spawn(move || {
+                // Wait for all threads to be ready
+                barrier.wait();
+
                 let mut local_validations = if args.msg_check_len > 0 {
                     Vec::with_capacity((args.msg_count as usize / 2) + 1)
                 } else {
