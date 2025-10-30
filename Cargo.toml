@@ -15,6 +15,7 @@ members = ["test_support"]
 [features]
 default = []
 futex = ["wait_on_address"]
+blocking = []
 
 [dev-dependencies]
 clap = { version = "4.4", features = ["derive"] }
