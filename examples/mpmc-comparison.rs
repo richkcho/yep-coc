@@ -10,6 +10,12 @@ use yep_coc::{
     queue_alloc_helpers::{YCQueueOwnedData, YCQueueSharedData},
 };
 
+#[cfg(feature = "futex")]
+use yep_coc::{
+    YCFutexQueue,
+    queue_alloc_helpers::{YCFutexQueueOwnedData, YCFutexQueueSharedData},
+};
+
 const PATTERN: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 const INDEX_PREFIX_LEN: usize = std::mem::size_of::<u32>();
 
@@ -270,6 +276,249 @@ fn run_ycqueue(args: &Args, slot_size: u16, default_message: &str) -> Duration {
 
         if seen.iter().any(|received| !received) {
             panic!("YCQueue: Not all expected message indices were observed during validation");
+        }
+    }
+
+    let start = start_time.lock().unwrap().unwrap();
+    let end = end_time.lock().unwrap().unwrap();
+    end.duration_since(start)
+}
+
+#[cfg(feature = "futex")]
+fn run_ycfutexqueue(args: &Args, slot_size: u16, default_message: &str) -> Duration {
+    let validation_len = if args.msg_check_len > 0 {
+        std::cmp::max(args.msg_check_len, INDEX_PREFIX_LEN as u16)
+    } else {
+        0
+    };
+
+    let owned_data = YCFutexQueueOwnedData::new(args.queue_depth, slot_size);
+
+    let mut producer_queues = Vec::with_capacity(args.producer_threads as usize);
+    let mut consumer_queues = Vec::with_capacity(args.consumer_threads as usize);
+
+    for _ in 0..args.producer_threads {
+        let shared = YCFutexQueueSharedData::from_owned_data(&owned_data);
+        producer_queues.push(YCFutexQueue::new(
+            YCQueue::new(shared.data.meta, shared.data.data).unwrap(),
+            shared.count,
+        ));
+    }
+
+    for _ in 0..args.consumer_threads {
+        let shared = YCFutexQueueSharedData::from_owned_data(&owned_data);
+        consumer_queues.push(YCFutexQueue::new(
+            YCQueue::new(shared.data.meta, shared.data.data).unwrap(),
+            shared.count,
+        ));
+    }
+
+    let consumed_count = Arc::new(AtomicU32::new(0));
+    let validation_storage = Arc::new(Mutex::new(Vec::with_capacity(if args.msg_check_len > 0 {
+        args.msg_count as usize
+    } else {
+        0
+    })));
+    let producer_thread_count = args.producer_threads as u32;
+    let base_messages_per_thread = args.msg_count / producer_thread_count;
+    let extra_messages = args.msg_count % producer_thread_count;
+
+    let start_time: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
+    let end_time: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
+
+    // Create barrier to synchronize all threads before starting benchmark
+    let total_threads = args.producer_threads as usize + args.consumer_threads as usize;
+    let barrier = Arc::new(Barrier::new(total_threads));
+
+    let timeout = Duration::from_millis(1);
+
+    thread::scope(|s| {
+        let mut next_index = 0u32;
+
+        // Spawn producer threads
+        for (thread_idx, mut queue) in producer_queues.into_iter().enumerate() {
+            let extra = if thread_idx < extra_messages as usize {
+                1u32
+            } else {
+                0u32
+            };
+            let range_start = next_index;
+            let range_end = range_start + base_messages_per_thread + extra;
+            next_index = range_end;
+
+            let validation_len = validation_len as usize;
+            let verbose = args.verbose;
+            let in_flight_limit = args.in_flight_count;
+            let msg_check_len = args.msg_check_len;
+            let start_time = Arc::clone(&start_time);
+            let barrier = Arc::clone(&barrier);
+
+            s.spawn(move || {
+                // Wait for all threads to be ready
+                barrier.wait();
+
+                // First producer thread sets the start time after barrier
+                if thread_idx == 0 {
+                    *start_time.lock().unwrap() = Some(Instant::now());
+                }
+
+                for msg_index in range_start..range_end {
+                    loop {
+                        if queue.queue.in_flight_count() >= in_flight_limit {
+                            thread::yield_now();
+                            continue;
+                        }
+
+                        match queue.get_produce_slot(timeout, Duration::ZERO) {
+                            Ok(slot) => {
+                                if msg_check_len > 0 {
+                                    slot.data[..INDEX_PREFIX_LEN]
+                                        .copy_from_slice(&msg_index.to_le_bytes());
+
+                                    for i in 0..validation_len.saturating_sub(INDEX_PREFIX_LEN) {
+                                        let b = PATTERN.as_bytes()
+                                            [(msg_index as usize + i) % PATTERN.len()];
+                                        slot.data[INDEX_PREFIX_LEN + i] = b;
+                                    }
+                                } else {
+                                    copy_str_to_slice(default_message, slot.data);
+                                }
+
+                                if verbose {
+                                    println!("YCFutexQueue send: {}", str_from_u8(slot.data));
+                                }
+
+                                queue.mark_slot_produced(slot).unwrap();
+                                break;
+                            }
+                            Err(YCQueueError::Timeout) => {
+                                thread::yield_now();
+                            }
+                            Err(e) => panic!("YCFutexQueue producer error: {e:?}"),
+                        }
+                    }
+                }
+            });
+        }
+
+        // Spawn consumer threads
+        for mut queue in consumer_queues {
+            let consumed_count = Arc::clone(&consumed_count);
+            let validation_len = validation_len as usize;
+            let msg_count = args.msg_count;
+            let verbose = args.verbose;
+            let validation_storage = Arc::clone(&validation_storage);
+            let msg_check_len = args.msg_check_len;
+            let end_time = Arc::clone(&end_time);
+            let barrier = Arc::clone(&barrier);
+
+            s.spawn(move || {
+                // Wait for all threads to be ready
+                barrier.wait();
+
+                let mut local_validations = if msg_check_len > 0 {
+                    Vec::with_capacity((msg_count as usize / 2) + 1)
+                } else {
+                    Vec::new()
+                };
+
+                loop {
+                    let current_count = consumed_count.load(Ordering::Relaxed);
+                    if current_count >= msg_count {
+                        break;
+                    }
+
+                    match queue.get_consume_slot(timeout, Duration::ZERO) {
+                        Ok(slot) => {
+                            let msg_index = consumed_count.fetch_add(1, Ordering::Relaxed);
+
+                            if msg_index >= msg_count {
+                                // Another thread already consumed the last message
+                                break;
+                            }
+
+                            if msg_check_len > 0 {
+                                local_validations.push(slot.data[..validation_len].to_vec());
+                            }
+
+                            if verbose {
+                                let s = str_from_u8(slot.data);
+                                println!("YCFutexQueue recv: {s}");
+                            }
+
+                            queue.mark_slot_consumed(slot).unwrap();
+                        }
+                        Err(YCQueueError::Timeout) => {
+                            thread::yield_now();
+                        }
+                        Err(e) => panic!("YCFutexQueue consumer error: {e:?}"),
+                    }
+                }
+
+                // Record end time from last consumer to finish
+                *end_time.lock().unwrap() = Some(Instant::now());
+
+                if msg_check_len > 0 && !local_validations.is_empty() {
+                    let mut guard = validation_storage.lock().unwrap();
+                    guard.extend(local_validations);
+                }
+            });
+        }
+    });
+
+    // Validate messages if needed
+    if args.msg_check_len > 0 {
+        let messages = Arc::try_unwrap(validation_storage)
+            .expect("validation storage still has outstanding references")
+            .into_inner()
+            .expect("validation storage mutex poisoned");
+
+        if messages.len() != args.msg_count as usize {
+            panic!(
+                "YCFutexQueue: Expected {} validated messages but collected {}",
+                args.msg_count,
+                messages.len()
+            );
+        }
+
+        let mut seen = vec![false; args.msg_count as usize];
+        let payload_len = (validation_len as usize).saturating_sub(INDEX_PREFIX_LEN);
+
+        for message in messages {
+            if message.len() < INDEX_PREFIX_LEN {
+                panic!("YCFutexQueue: Validated message shorter than index header");
+            }
+
+            let mut index_bytes = [0u8; 4];
+            index_bytes.copy_from_slice(&message[..INDEX_PREFIX_LEN]);
+            let index = u32::from_le_bytes(index_bytes);
+
+            if index >= args.msg_count {
+                panic!("YCFutexQueue: Received message index {index} out of expected range");
+            }
+
+            if seen[index as usize] {
+                panic!("YCFutexQueue: Duplicate message index {index} detected during validation");
+            }
+            seen[index as usize] = true;
+
+            for (offset, &byte) in message[INDEX_PREFIX_LEN..INDEX_PREFIX_LEN + payload_len]
+                .iter()
+                .enumerate()
+            {
+                let expected = PATTERN.as_bytes()[(index as usize + offset) % PATTERN.len()];
+                if byte != expected {
+                    panic!(
+                        "YCFutexQueue: Message content mismatch at message {index}, byte {offset}:\nExpected: '{expected}'\nReceived: '{byte}'",
+                    );
+                }
+            }
+        }
+
+        if seen.iter().any(|received| !received) {
+            panic!(
+                "YCFutexQueue: Not all expected message indices were observed during validation"
+            );
         }
     }
 
@@ -746,28 +995,39 @@ fn main() {
     }
 
     let yc_dur = run_ycqueue(&args, slot_size, default_message);
-    let mv_dur = run_mutex_vecdeque(&args, slot_size, default_message);
+    #[cfg(feature = "futex")]
+    let ycf_dur = run_ycfutexqueue(&args, slot_size, default_message);
     let flume_dur = run_flume(&args, slot_size, default_message);
+    let mv_dur = run_mutex_vecdeque(&args, slot_size, default_message);
 
     println!("\nResults (lower is better):");
     println!(
         "  YCQueue:          {:.3} us",
         yc_dur.as_nanos() as f64 / 1_000.0
     );
+    #[cfg(feature = "futex")]
     println!(
-        "  Mutex+VecDeque:   {:.3} us",
-        mv_dur.as_nanos() as f64 / 1_000.0
+        "  YCFutexQueue:     {:.3} us",
+        ycf_dur.as_nanos() as f64 / 1_000.0
     );
     println!(
         "  Flume (bounded):  {:.3} us",
         flume_dur.as_nanos() as f64 / 1_000.0
     );
+    println!(
+        "  Mutex+VecDeque:   {:.3} us",
+        mv_dur.as_nanos() as f64 / 1_000.0
+    );
 
     let yc_msgs_per_sec = (args.msg_count as f64) / yc_dur.as_secs_f64();
-    let mv_msgs_per_sec = (args.msg_count as f64) / mv_dur.as_secs_f64();
+    #[cfg(feature = "futex")]
+    let ycf_msgs_per_sec = (args.msg_count as f64) / ycf_dur.as_secs_f64();
     let flume_msgs_per_sec = (args.msg_count as f64) / flume_dur.as_secs_f64();
+    let mv_msgs_per_sec = (args.msg_count as f64) / mv_dur.as_secs_f64();
     println!("\nThroughput:");
     println!("  YCQueue:          {:.2} msgs/s", yc_msgs_per_sec);
-    println!("  Mutex+VecDeque:   {:.2} msgs/s", mv_msgs_per_sec);
+    #[cfg(feature = "futex")]
+    println!("  YCFutexQueue:     {:.2} msgs/s", ycf_msgs_per_sec);
     println!("  Flume (bounded):  {:.2} msgs/s", flume_msgs_per_sec);
+    println!("  Mutex+VecDeque:   {:.2} msgs/s", mv_msgs_per_sec);
 }
