@@ -11,6 +11,12 @@ pub mod futex_queue;
 #[cfg(feature = "futex")]
 pub use futex_queue::YCFutexQueue;
 
+/// Blocking queue backed by Mutex and CondVar (optional feature)
+#[cfg(feature = "futex")]
+pub mod blocking_queue;
+#[cfg(feature = "futex")]
+pub use blocking_queue::YCBlockingQueue;
+
 /// dependencies for the circular queue code
 pub mod queue_meta;
 pub use queue_meta::YCQueueSharedMeta;
