@@ -46,7 +46,7 @@ fn run_ycqueue(args: &Args, slot_size: u16, default_message: &str) -> Duration {
 
     let start_time: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
     let end_time: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
-    
+
     // Create barrier to synchronize both threads before starting benchmark
     let barrier = Arc::new(Barrier::new(2));
 
@@ -57,7 +57,7 @@ fn run_ycqueue(args: &Args, slot_size: u16, default_message: &str) -> Duration {
             s.spawn(move || {
             // Wait for both threads to be ready
             barrier.wait();
-            
+
             let mut messages_received = 0u32;
             while messages_received < args.msg_count {
                 match consumer_queue.get_consume_slot() {
@@ -101,10 +101,10 @@ fn run_ycqueue(args: &Args, slot_size: u16, default_message: &str) -> Duration {
             s.spawn(move || {
                 // Wait for both threads to be ready
                 barrier.wait();
-                
+
                 // Producer thread sets the start time after barrier
                 *start_time.lock().unwrap() = Some(Instant::now());
-                
+
                 let mut messages_sent = 0u32;
                 while messages_sent < args.msg_count {
                     if producer_queue.in_flight_count() >= args.in_flight_count {
@@ -154,7 +154,7 @@ fn run_mutex_vecdeque(args: &Args, slot_size: u16, default_message: &str) -> Dur
     // Shared start/end times guarded by a Mutex
     let start_time: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
     let end_time: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
-    
+
     // Create barrier to synchronize both threads before starting benchmark
     let barrier = Arc::new(Barrier::new(2));
 
@@ -168,7 +168,7 @@ fn run_mutex_vecdeque(args: &Args, slot_size: u16, default_message: &str) -> Dur
             s.spawn(move || {
                 // Wait for both threads to be ready
                 barrier.wait();
-                
+
                 let mut messages_received = 0u32;
                 while messages_received < args.msg_count {
                     let maybe_msg = {
@@ -211,10 +211,10 @@ fn run_mutex_vecdeque(args: &Args, slot_size: u16, default_message: &str) -> Dur
             s.spawn(move || {
                 // Wait for both threads to be ready
                 barrier.wait();
-                
+
                 // Producer thread sets the start time after barrier
                 *start_time.lock().unwrap() = Some(Instant::now());
-                
+
                 let mut messages_sent = 0u32;
                 while messages_sent < args.msg_count {
                     // Enforce in-flight limit using current queue length
@@ -269,7 +269,7 @@ fn run_flume(args: &Args, slot_size: u16, default_message: &str) -> Duration {
 
     let start_time: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
     let end_time: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
-    
+
     // Create barrier to synchronize both threads before starting benchmark
     let barrier = Arc::new(Barrier::new(2));
 
@@ -282,7 +282,7 @@ fn run_flume(args: &Args, slot_size: u16, default_message: &str) -> Duration {
             s.spawn(move || {
                 // Wait for both threads to be ready
                 barrier.wait();
-                
+
                 let mut messages_received = 0u32;
                 while messages_received < args.msg_count {
                     let buf = receiver.recv().expect("Flume channel closed");
@@ -319,10 +319,10 @@ fn run_flume(args: &Args, slot_size: u16, default_message: &str) -> Duration {
             s.spawn(move || {
                 // Wait for both threads to be ready
                 barrier.wait();
-                
+
                 // Producer thread sets the start time after barrier
                 *start_time.lock().unwrap() = Some(Instant::now());
-                
+
                 let mut messages_sent = 0u32;
                 while messages_sent < args.msg_count {
                     if sender.len() >= args.in_flight_count as usize {
