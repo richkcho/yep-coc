@@ -312,7 +312,7 @@ fn run_ycblockingqueue(args: &Args, slot_size: u16, default_message: &str) -> Du
 
                 let mut messages_received = 0u32;
                 while messages_received < args.msg_count {
-                    match consumer_queue.get_consume_slot(timeout, Duration::ZERO) {
+                    match consumer_queue.get_consume_slot(timeout) {
                         Ok(consume_slot) => {
                             // Optional validation
                             if args.msg_check_len > 0 {
@@ -364,7 +364,7 @@ fn run_ycblockingqueue(args: &Args, slot_size: u16, default_message: &str) -> Du
                         continue;
                     }
 
-                    match producer_queue.get_produce_slot(timeout, Duration::ZERO) {
+                    match producer_queue.get_produce_slot(timeout) {
                         Ok(produce_slot) => {
                             if args.msg_check_len > 0 {
                                 for i in 0..args.msg_check_len as usize {

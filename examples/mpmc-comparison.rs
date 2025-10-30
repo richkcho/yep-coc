@@ -620,7 +620,7 @@ fn run_ycblockingqueue(args: &Args, slot_size: u16, default_message: &str) -> Du
                             continue;
                         }
 
-                        match queue.get_produce_slot(timeout, Duration::ZERO) {
+                        match queue.get_produce_slot(timeout) {
                             Ok(slot) => {
                                 if msg_check_len > 0 {
                                     slot.data[..INDEX_PREFIX_LEN]
@@ -679,7 +679,7 @@ fn run_ycblockingqueue(args: &Args, slot_size: u16, default_message: &str) -> Du
                         break;
                     }
 
-                    match queue.get_consume_slot(timeout, Duration::ZERO) {
+                    match queue.get_consume_slot(timeout) {
                         Ok(slot) => {
                             let msg_index = consumed_count.fetch_add(1, Ordering::Relaxed);
 

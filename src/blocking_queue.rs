@@ -62,7 +62,6 @@ impl<'a> YCBlockingQueue<'a> {
     /// * `best_effort` - When `true`, returns the currently available contiguous span even if it
     ///   is smaller than `num_slots`.
     /// * `timeout` - Maximum time to wait for space before returning `YCQueueError::Timeout`.
-    /// * `retry_interval` - Minimum delay between retries when the queue is not ready yet.
     ///
     /// # Returns
     /// `Ok` with one or more slots reserved for production.
@@ -83,7 +82,7 @@ impl<'a> YCBlockingQueue<'a> {
     ///
     /// let timeout = Duration::from_millis(1);
     /// let slots = queue
-    ///     .get_produce_slots(2, false, timeout, Duration::ZERO)
+    ///     .get_produce_slots(2, false, timeout)
     ///     .unwrap();
     /// queue.mark_slots_produced(slots).unwrap();
     /// # }
@@ -93,12 +92,9 @@ impl<'a> YCBlockingQueue<'a> {
         num_slots: u16,
         best_effort: bool,
         timeout: Duration,
-        retry_interval: Duration,
     ) -> Result<Vec<YCQueueProduceSlot<'a>>, YCQueueError> {
         let start_time = Instant::now();
         loop {
-            let wait_start = Instant::now();
-
             // Wait until count < capacity (space available)
             let mut count_guard = self.count.lock().unwrap();
             let capacity = self.queue.capacity() as i32;
@@ -123,11 +119,8 @@ impl<'a> YCBlockingQueue<'a> {
             match ret {
                 Ok(slots) => return Ok(slots),
                 Err(_) => {
-                    if let Some(remaining_duration) =
-                        retry_interval.checked_sub(wait_start.elapsed())
-                    {
-                        std::thread::sleep(remaining_duration)
-                    }
+                    // Retry the loop - the condition variable will block if needed
+                    continue;
                 }
             }
         }
@@ -140,7 +133,6 @@ impl<'a> YCBlockingQueue<'a> {
     ///
     /// # Arguments
     /// * `timeout` - Maximum time to wait before giving up with `YCQueueError::Timeout`.
-    /// * `retry_interval` - Minimum delay between retries when capacity is not yet available.
     ///
     /// # Returns
     /// `Ok` with the next available `YCQueueProduceSlot`.
@@ -160,7 +152,7 @@ impl<'a> YCBlockingQueue<'a> {
     ///
     /// let timeout = Duration::from_millis(1);
     /// let slot = queue
-    ///     .get_produce_slot(timeout, Duration::ZERO)
+    ///     .get_produce_slot(timeout)
     ///     .unwrap();
     /// queue.mark_slot_produced(slot).unwrap();
     /// # }
@@ -168,9 +160,8 @@ impl<'a> YCBlockingQueue<'a> {
     pub fn get_produce_slot(
         &mut self,
         timeout: Duration,
-        retry_interval: Duration,
     ) -> Result<YCQueueProduceSlot<'a>, YCQueueError> {
-        let mut slots = self.get_produce_slots(1, false, timeout, retry_interval)?;
+        let mut slots = self.get_produce_slots(1, false, timeout)?;
 
         Ok(slots
             .pop()
@@ -184,7 +175,6 @@ impl<'a> YCBlockingQueue<'a> {
     /// * `best_effort` - When `true`, returns the currently published contiguous run even if it is
     ///   smaller than `num_slots`.
     /// * `timeout` - Maximum time to wait for data before returning `YCQueueError::Timeout`.
-    /// * `retry_interval` - Minimum delay between retries when no slots are currently ready.
     ///
     /// # Returns
     /// `Ok` with one or more contiguous slots available for consumption.
@@ -204,12 +194,12 @@ impl<'a> YCBlockingQueue<'a> {
     /// let mut queue = YCBlockingQueue::from_owned_data(&owned).unwrap();
     /// let timeout = Duration::from_millis(1);
     /// let slots = queue
-    ///     .get_produce_slots(2, false, timeout, Duration::ZERO)
+    ///     .get_produce_slots(2, false, timeout)
     ///     .unwrap();
     /// queue.mark_slots_produced(slots).unwrap();
     ///
     /// let ready = queue
-    ///     .get_consume_slots(2, false, timeout, Duration::ZERO)
+    ///     .get_consume_slots(2, false, timeout)
     ///     .unwrap();
     /// queue.mark_slots_consumed(ready).unwrap();
     /// # }
@@ -219,12 +209,9 @@ impl<'a> YCBlockingQueue<'a> {
         num_slots: u16,
         best_effort: bool,
         timeout: Duration,
-        retry_interval: Duration,
     ) -> Result<Vec<YCQueueConsumeSlot<'a>>, YCQueueError> {
         let start_time = Instant::now();
         loop {
-            let wait_start = Instant::now();
-
             // Wait until count > 0 (data available)
             let mut count_guard = self.count.lock().unwrap();
             while *count_guard <= 0 {
@@ -263,11 +250,8 @@ impl<'a> YCBlockingQueue<'a> {
                     return Ok(slots);
                 }
                 Err(_) => {
-                    if let Some(remaining_duration) =
-                        retry_interval.checked_sub(wait_start.elapsed())
-                    {
-                        std::thread::sleep(remaining_duration)
-                    }
+                    // Retry the loop - the condition variable will block if needed
+                    continue;
                 }
             }
         }
@@ -280,7 +264,6 @@ impl<'a> YCBlockingQueue<'a> {
     ///
     /// # Arguments
     /// * `timeout` - Maximum time to wait before giving up with `YCQueueError::Timeout`.
-    /// * `retry_interval` - Minimum delay between retries when no slots are yet published.
     ///
     /// # Returns
     /// `Ok` with the next ready `YCQueueConsumeSlot`.
@@ -300,12 +283,12 @@ impl<'a> YCBlockingQueue<'a> {
     ///
     /// let timeout = Duration::from_millis(1);
     /// let to_publish = queue
-    ///     .get_produce_slots(1, false, timeout, Duration::ZERO)
+    ///     .get_produce_slots(1, false, timeout)
     ///     .unwrap();
     /// queue.mark_slots_produced(to_publish).unwrap();
     ///
     /// let slot = queue
-    ///     .get_consume_slot(timeout, Duration::ZERO)
+    ///     .get_consume_slot(timeout)
     ///     .unwrap();
     /// queue.mark_slot_consumed(slot).unwrap();
     /// # }
@@ -313,9 +296,8 @@ impl<'a> YCBlockingQueue<'a> {
     pub fn get_consume_slot(
         &mut self,
         timeout: Duration,
-        retry_interval: Duration,
     ) -> Result<YCQueueConsumeSlot<'a>, YCQueueError> {
-        let mut slots = self.get_consume_slots(1, false, timeout, retry_interval)?;
+        let mut slots = self.get_consume_slots(1, false, timeout)?;
 
         Ok(slots
             .pop()
@@ -345,7 +327,7 @@ impl<'a> YCBlockingQueue<'a> {
     /// let mut queue = YCBlockingQueue::from_owned_data(&owned).unwrap();
     ///
     /// let slot = queue
-    ///     .get_produce_slot(Duration::from_millis(1), Duration::ZERO)
+    ///     .get_produce_slot(Duration::from_millis(1))
     ///     .unwrap();
     /// queue.mark_slot_produced(slot).unwrap();
     /// # }
@@ -383,7 +365,7 @@ impl<'a> YCBlockingQueue<'a> {
     ///
     /// let timeout = Duration::from_millis(1);
     /// let slots = queue
-    ///     .get_produce_slots(3, false, timeout, Duration::ZERO)
+    ///     .get_produce_slots(3, false, timeout)
     ///     .unwrap();
     /// queue.mark_slots_produced(slots).unwrap();
     /// # }
@@ -433,12 +415,12 @@ impl<'a> YCBlockingQueue<'a> {
     ///
     /// let timeout = Duration::from_millis(1);
     /// let slots = queue
-    ///     .get_produce_slots(1, false, timeout, Duration::ZERO)
+    ///     .get_produce_slots(1, false, timeout)
     ///     .unwrap();
     /// queue.mark_slots_produced(slots).unwrap();
     ///
     /// let slot = queue
-    ///     .get_consume_slot(timeout, Duration::ZERO)
+    ///     .get_consume_slot(timeout)
     ///     .unwrap();
     /// queue.mark_slot_consumed(slot).unwrap();
     /// # }
@@ -473,12 +455,12 @@ impl<'a> YCBlockingQueue<'a> {
     ///
     /// let timeout = Duration::from_millis(1);
     /// let slots = queue
-    ///     .get_produce_slots(4, false, timeout, Duration::ZERO)
+    ///     .get_produce_slots(4, false, timeout)
     ///     .unwrap();
     /// queue.mark_slots_produced(slots).unwrap();
     ///
     /// let ready = queue
-    ///     .get_consume_slots(4, false, timeout, Duration::ZERO)
+    ///     .get_consume_slots(4, false, timeout)
     ///     .unwrap();
     /// queue.mark_slots_consumed(ready).unwrap();
     /// # }
@@ -504,7 +486,7 @@ mod tests {
         let mut blocking_queue = YCBlockingQueue::from_owned_data(&owned).unwrap();
 
         let mut slots = blocking_queue
-            .get_produce_slots(1, false, DEFAULT_SMALL_TIMEOUT, Duration::ZERO)
+            .get_produce_slots(1, false, DEFAULT_SMALL_TIMEOUT)
             .expect("reserve slot");
         let slot = slots.pop().expect("slot");
         slot.data[0] = 0x11;
@@ -512,7 +494,7 @@ mod tests {
         assert_eq!(*blocking_queue.count.lock().unwrap(), 1);
 
         let mut consume_slots = blocking_queue
-            .get_consume_slots(1, false, DEFAULT_SMALL_TIMEOUT, Duration::ZERO)
+            .get_consume_slots(1, false, DEFAULT_SMALL_TIMEOUT)
             .expect("consume slot");
         let slot = consume_slots.pop().expect("consume slot");
         assert_eq!(slot.data[0], 0x11);
@@ -520,7 +502,7 @@ mod tests {
         assert_eq!(*blocking_queue.count.lock().unwrap(), 0);
 
         let mut slots = blocking_queue
-            .get_produce_slots(1, true, DEFAULT_SMALL_TIMEOUT, Duration::ZERO)
+            .get_produce_slots(1, true, DEFAULT_SMALL_TIMEOUT)
             .expect("best-effort reserve slot");
         let slot = slots.pop().expect("slot");
         slot.data[0] = 0x22;
@@ -528,7 +510,7 @@ mod tests {
         assert_eq!(*blocking_queue.count.lock().unwrap(), 1);
 
         let mut consume_slots = blocking_queue
-            .get_consume_slots(1, true, DEFAULT_SMALL_TIMEOUT, Duration::ZERO)
+            .get_consume_slots(1, true, DEFAULT_SMALL_TIMEOUT)
             .expect("best-effort consume slot");
         let slot = consume_slots.pop().expect("consume slot");
         assert_eq!(slot.data[0], 0x22);
@@ -542,7 +524,7 @@ mod tests {
         let mut blocking_queue = YCBlockingQueue::from_owned_data(&owned).unwrap();
 
         let mut slots = blocking_queue
-            .get_produce_slots(4, false, DEFAULT_SMALL_TIMEOUT, Duration::ZERO)
+            .get_produce_slots(4, false, DEFAULT_SMALL_TIMEOUT)
             .expect("reserve batch");
         for (i, slot) in slots.iter_mut().enumerate() {
             slot.data[0] = i as u8;
@@ -553,7 +535,7 @@ mod tests {
         assert_eq!(*blocking_queue.count.lock().unwrap(), 4);
 
         let consume_first = blocking_queue
-            .get_consume_slots(2, false, DEFAULT_SMALL_TIMEOUT, Duration::ZERO)
+            .get_consume_slots(2, false, DEFAULT_SMALL_TIMEOUT)
             .expect("consume first half");
         assert_eq!(*blocking_queue.count.lock().unwrap(), 2);
         blocking_queue
@@ -561,7 +543,7 @@ mod tests {
             .expect("consume first half");
 
         let consume_second = blocking_queue
-            .get_consume_slots(2, false, DEFAULT_SMALL_TIMEOUT, Duration::ZERO)
+            .get_consume_slots(2, false, DEFAULT_SMALL_TIMEOUT)
             .expect("consume second half");
         assert_eq!(*blocking_queue.count.lock().unwrap(), 0);
         for (i, slot) in consume_second.iter().enumerate() {
@@ -580,19 +562,19 @@ mod tests {
 
         assert_eq!(
             blocking_queue
-                .get_consume_slots(1, false, DEFAULT_SMALL_TIMEOUT, Duration::ZERO)
+                .get_consume_slots(1, false, DEFAULT_SMALL_TIMEOUT)
                 .expect_err("empty queue should time out"),
             YCQueueError::Timeout
         );
         assert_eq!(
             blocking_queue
-                .get_consume_slots(1, true, DEFAULT_SMALL_TIMEOUT, Duration::ZERO)
+                .get_consume_slots(1, true, DEFAULT_SMALL_TIMEOUT)
                 .expect_err("empty queue should time out"),
             YCQueueError::Timeout
         );
 
         let slots = blocking_queue
-            .get_produce_slots(slot_count, false, DEFAULT_SMALL_TIMEOUT, Duration::ZERO)
+            .get_produce_slots(slot_count, false, DEFAULT_SMALL_TIMEOUT)
             .expect("reserve full queue");
         blocking_queue
             .mark_slots_produced(slots)
@@ -601,19 +583,19 @@ mod tests {
 
         assert_eq!(
             blocking_queue
-                .get_produce_slots(1, false, DEFAULT_SMALL_TIMEOUT, Duration::ZERO)
+                .get_produce_slots(1, false, DEFAULT_SMALL_TIMEOUT)
                 .expect_err("full queue should time out"),
             YCQueueError::Timeout
         );
         assert_eq!(
             blocking_queue
-                .get_produce_slots(1, true, DEFAULT_SMALL_TIMEOUT, Duration::ZERO)
+                .get_produce_slots(1, true, DEFAULT_SMALL_TIMEOUT)
                 .expect_err("full queue should time out"),
             YCQueueError::Timeout
         );
 
         let pending = blocking_queue
-            .get_consume_slots(slot_count, false, DEFAULT_SMALL_TIMEOUT, Duration::ZERO)
+            .get_consume_slots(slot_count, false, DEFAULT_SMALL_TIMEOUT)
             .expect("drain queue");
         blocking_queue
             .mark_slots_consumed(pending)

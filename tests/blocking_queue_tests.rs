@@ -43,7 +43,7 @@ mod blocking_queue_tests {
                 let mut counter = 0;
 
                 while counter < slot_count * num_iterations {
-                    match consume_queue.get_consume_slot(DEFAULT_SMALL_TIMEOUT, Duration::ZERO) {
+                    match consume_queue.get_consume_slot(DEFAULT_SMALL_TIMEOUT) {
                         Ok(consume_slot) => {
                             let expected_str = format!("hello-{counter}");
                             let actual_str = str_from_u8(consume_slot.data);
@@ -76,7 +76,7 @@ mod blocking_queue_tests {
                 let mut counter = 0;
 
                 while counter < slot_count * num_iterations {
-                    match produce_queue.get_produce_slot(DEFAULT_SMALL_TIMEOUT, Duration::ZERO) {
+                    match produce_queue.get_produce_slot(DEFAULT_SMALL_TIMEOUT) {
                         Ok(produce_slot) => {
                             let produce_str = format!("hello-{counter}");
                             copy_str_to_slice(&produce_str, &mut *produce_slot.data);
@@ -144,7 +144,7 @@ mod blocking_queue_tests {
                 builder
                     .spawn_scoped(s, move || {
                         while received_ids.lock().unwrap().len() < max_messages as usize {
-                            match consume_queue.get_consume_slot(DEFAULT_SMALL_TIMEOUT, Duration::ZERO) {
+                            match consume_queue.get_consume_slot(DEFAULT_SMALL_TIMEOUT) {
                                 Ok(consume_slot) => {
                                     let message = str_from_u8(consume_slot.data);
                                     let id_str = message
@@ -198,7 +198,7 @@ mod blocking_queue_tests {
                         let mut id = counter.fetch_add(1, Ordering::AcqRel);
                         while id < max_messages {
                             match produce_queue
-                                .get_produce_slot(DEFAULT_SMALL_TIMEOUT, Duration::ZERO)
+                                .get_produce_slot(DEFAULT_SMALL_TIMEOUT)
                             {
                                 Ok(produce_slot) => {
                                     let produce_str = format!("hello-{id}");
