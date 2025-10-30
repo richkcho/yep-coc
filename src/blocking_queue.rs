@@ -96,24 +96,25 @@ impl<'a> YCBlockingQueue<'a> {
         let start_time = Instant::now();
         loop {
             // Wait until enough space is available
-            let mut count_guard = self.count.lock().unwrap();
+            let count_guard = self.count.lock().unwrap();
             let capacity = self.queue.capacity() as i32;
             let min_required_space = if best_effort { 1 } else { num_slots as i32 };
             
-            while (capacity - *count_guard) < min_required_space {
-                // Recalculate remaining timeout before each wait
-                let remaining_timeout = match timeout.checked_sub(start_time.elapsed()) {
-                    Some(t) => t,
-                    None => return Err(YCQueueError::Timeout),
-                };
-                
-                let (new_guard, timeout_result) =
-                    self.condvar.wait_timeout(count_guard, remaining_timeout).unwrap();
-                count_guard = new_guard;
-                
-                if timeout_result.timed_out() {
-                    return Err(YCQueueError::Timeout);
-                }
+            // Calculate remaining timeout
+            let remaining_timeout = match timeout.checked_sub(start_time.elapsed()) {
+                Some(t) => t,
+                None => return Err(YCQueueError::Timeout),
+            };
+            
+            let (count_guard, timeout_result) = self
+                .condvar
+                .wait_timeout_while(count_guard, remaining_timeout, |count| {
+                    (capacity - *count) < min_required_space
+                })
+                .unwrap();
+            
+            if timeout_result.timed_out() {
+                return Err(YCQueueError::Timeout);
             }
             drop(count_guard);
 
@@ -215,23 +216,24 @@ impl<'a> YCBlockingQueue<'a> {
         let start_time = Instant::now();
         loop {
             // Wait until enough data is available
-            let mut count_guard = self.count.lock().unwrap();
+            let count_guard = self.count.lock().unwrap();
             let min_required_count = if best_effort { 1 } else { num_slots as i32 };
             
-            while *count_guard < min_required_count {
-                // Recalculate remaining timeout before each wait
-                let remaining_timeout = match timeout.checked_sub(start_time.elapsed()) {
-                    Some(t) => t,
-                    None => return Err(YCQueueError::Timeout),
-                };
-                
-                let (new_guard, timeout_result) =
-                    self.condvar.wait_timeout(count_guard, remaining_timeout).unwrap();
-                count_guard = new_guard;
-                
-                if timeout_result.timed_out() {
-                    return Err(YCQueueError::Timeout);
-                }
+            // Calculate remaining timeout
+            let remaining_timeout = match timeout.checked_sub(start_time.elapsed()) {
+                Some(t) => t,
+                None => return Err(YCQueueError::Timeout),
+            };
+            
+            let (count_guard, timeout_result) = self
+                .condvar
+                .wait_timeout_while(count_guard, remaining_timeout, |count| {
+                    *count < min_required_count
+                })
+                .unwrap();
+            
+            if timeout_result.timed_out() {
+                return Err(YCQueueError::Timeout);
             }
             drop(count_guard);
 
