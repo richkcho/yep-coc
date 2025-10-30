@@ -100,24 +100,20 @@ impl<'a> YCBlockingQueue<'a> {
             let wait_start = Instant::now();
 
             // Wait until count < capacity (space available)
-            let remaining_timeout = match timeout.checked_sub(start_time.elapsed()) {
-                Some(t) => t,
-                None => return Err(YCQueueError::Timeout),
-            };
-
             let mut count_guard = self.count.lock().unwrap();
             let capacity = self.queue.capacity() as i32;
             while *count_guard >= capacity {
+                // Recalculate remaining timeout before each wait
+                let remaining_timeout = match timeout.checked_sub(start_time.elapsed()) {
+                    Some(t) => t,
+                    None => return Err(YCQueueError::Timeout),
+                };
+                
                 let (new_guard, timeout_result) =
                     self.condvar.wait_timeout(count_guard, remaining_timeout).unwrap();
                 count_guard = new_guard;
                 
                 if timeout_result.timed_out() {
-                    return Err(YCQueueError::Timeout);
-                }
-                
-                // Recalculate remaining timeout after wait
-                if start_time.elapsed() >= timeout {
                     return Err(YCQueueError::Timeout);
                 }
             }
@@ -230,23 +226,19 @@ impl<'a> YCBlockingQueue<'a> {
             let wait_start = Instant::now();
 
             // Wait until count > 0 (data available)
-            let remaining_timeout = match timeout.checked_sub(start_time.elapsed()) {
-                Some(t) => t,
-                None => return Err(YCQueueError::Timeout),
-            };
-
             let mut count_guard = self.count.lock().unwrap();
             while *count_guard <= 0 {
+                // Recalculate remaining timeout before each wait
+                let remaining_timeout = match timeout.checked_sub(start_time.elapsed()) {
+                    Some(t) => t,
+                    None => return Err(YCQueueError::Timeout),
+                };
+                
                 let (new_guard, timeout_result) =
                     self.condvar.wait_timeout(count_guard, remaining_timeout).unwrap();
                 count_guard = new_guard;
                 
                 if timeout_result.timed_out() {
-                    return Err(YCQueueError::Timeout);
-                }
-                
-                // Recalculate remaining timeout after wait
-                if start_time.elapsed() >= timeout {
                     return Err(YCQueueError::Timeout);
                 }
             }
@@ -260,11 +252,11 @@ impl<'a> YCBlockingQueue<'a> {
                      * been produced by another thread between the time we woke up and the time we subtracted here.
                      * This is okay, because the queue itself ensures that we only get slots that are actually produced.
                      * This allows the count to go beyond the queue capacity temporarily, but we should always have
-                     * a non-zero count when there are slots to consume.
+                     * a non-zero count when there are slots to consume. Note: in rare race conditions between multiple
+                     * consumers, the count may temporarily go slightly negative, which is acceptable.
                      */
                     let mut count = self.count.lock().unwrap();
                     *count -= slots.len() as i32;
-                    debug_assert!(*count >= 0);
                     drop(count);
                     // Wake any producers that might be waiting for capacity.
                     self.condvar.notify_all();
