@@ -108,20 +108,42 @@ fn bench_spsc_throughput(c: &mut Criterion, params: BenchParams) {
                             
                             let mut messages_received = 0u64;
                             while messages_received < messages_per_iter {
-                                match consumer_queue.get_consume_slot() {
-                                    Ok(consume_slot) => {
-                                        // Use black_box to prevent dead code elimination
-                                        black_box(&consume_slot.data);
-                                        
-                                        consumer_queue
-                                            .mark_slot_consumed(consume_slot)
-                                            .expect("Failed to mark slot consumed");
-                                        messages_received += 1;
+                                // Try to consume up to batch_size items
+                                let remaining = messages_per_iter - messages_received;
+                                let request = std::cmp::min(params.batch_size as u64, remaining) as u16;
+                                
+                                if request == 1 {
+                                    // Single-slot operation
+                                    match consumer_queue.get_consume_slot() {
+                                        Ok(consume_slot) => {
+                                            black_box(&consume_slot.data);
+                                            consumer_queue
+                                                .mark_slot_consumed(consume_slot)
+                                                .expect("Failed to mark slot consumed");
+                                            messages_received += 1;
+                                        }
+                                        Err(YCQueueError::EmptyQueue) | Err(YCQueueError::SlotNotReady) => {
+                                            thread::yield_now();
+                                        }
+                                        Err(e) => panic!("Consumer error: {:?}", e),
                                     }
-                                    Err(YCQueueError::EmptyQueue) | Err(YCQueueError::SlotNotReady) => {
-                                        thread::yield_now();
+                                } else {
+                                    // Batch operation - use best_effort=true to get whatever is available
+                                    match consumer_queue.get_consume_slots(request, true) {
+                                        Ok(slots) => {
+                                            for slot in &slots {
+                                                black_box(&slot.data);
+                                            }
+                                            messages_received += slots.len() as u64;
+                                            consumer_queue
+                                                .mark_slots_consumed(slots)
+                                                .expect("Failed to mark slots consumed");
+                                        }
+                                        Err(YCQueueError::EmptyQueue) | Err(YCQueueError::SlotNotReady) => {
+                                            thread::yield_now();
+                                        }
+                                        Err(e) => panic!("Consumer error: {:?}", e),
                                     }
-                                    Err(e) => panic!("Consumer error: {:?}", e),
                                 }
                             }
                             
@@ -160,25 +182,50 @@ fn bench_spsc_throughput(c: &mut Criterion, params: BenchParams) {
                                     continue;
                                 }
                                 
-                                match producer_queue.get_produce_slot() {
-                                    Ok(produce_slot) => {
-                                        // Fill with pattern to prevent optimization
-                                        for i in 0..params.payload_size as usize {
-                                            produce_slot.data[i] = ((messages_sent as usize + i) % 256) as u8;
+                                // Try to produce up to batch_size items
+                                let remaining = messages_per_iter - messages_sent;
+                                let request = std::cmp::min(params.batch_size as u64, remaining) as u16;
+                                
+                                if request == 1 {
+                                    // Single-slot operation
+                                    match producer_queue.get_produce_slot() {
+                                        Ok(produce_slot) => {
+                                            // Fill with pattern to prevent optimization
+                                            for i in 0..params.payload_size as usize {
+                                                produce_slot.data[i] = ((messages_sent as usize + i) % 256) as u8;
+                                            }
+                                            black_box(&produce_slot.data);
+                                            producer_queue
+                                                .mark_slot_produced(produce_slot)
+                                                .expect("Failed to mark slot produced");
+                                            messages_sent += 1;
                                         }
-                                        
-                                        // Use black_box to prevent dead code elimination
-                                        black_box(&produce_slot.data);
-                                        
-                                        producer_queue
-                                            .mark_slot_produced(produce_slot)
-                                            .expect("Failed to mark slot produced");
-                                        messages_sent += 1;
+                                        Err(YCQueueError::OutOfSpace) | Err(YCQueueError::SlotNotReady) => {
+                                            thread::yield_now();
+                                        }
+                                        Err(e) => panic!("Producer error: {:?}", e),
                                     }
-                                    Err(YCQueueError::OutOfSpace) | Err(YCQueueError::SlotNotReady) => {
-                                        thread::yield_now();
+                                } else {
+                                    // Batch operation - use best_effort=true to get whatever is available
+                                    match producer_queue.get_produce_slots(request, true) {
+                                        Ok(mut slots) => {
+                                            for (idx, slot) in slots.iter_mut().enumerate() {
+                                                let msg_num = messages_sent + idx as u64;
+                                                for i in 0..params.payload_size as usize {
+                                                    slot.data[i] = ((msg_num as usize + i) % 256) as u8;
+                                                }
+                                                black_box(&slot.data);
+                                            }
+                                            messages_sent += slots.len() as u64;
+                                            producer_queue
+                                                .mark_slots_produced(slots)
+                                                .expect("Failed to mark slots produced");
+                                        }
+                                        Err(YCQueueError::OutOfSpace) | Err(YCQueueError::SlotNotReady) => {
+                                            thread::yield_now();
+                                        }
+                                        Err(e) => panic!("Producer error: {:?}", e),
                                     }
-                                    Err(e) => panic!("Producer error: {:?}", e),
                                 }
                             }
                         });
@@ -211,12 +258,12 @@ fn spsc_throughput_benchmarks(c: &mut Criterion) {
     
     for capacity in &capacities {
         for payload_size in &payload_sizes {
+            // Skip combinations that would overflow
+            if (*capacity as u32) * (*payload_size as u32) >= 65536 {
+                continue;
+            }
+            
             for batch_size in &batch_sizes {
-                // Skip combinations that would overflow
-                if (*capacity as u32) * (*payload_size as u32) >= 65536 {
-                    continue;
-                }
-                
                 let params = BenchParams {
                     capacity: *capacity,
                     payload_size: *payload_size,
