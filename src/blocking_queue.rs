@@ -34,7 +34,7 @@ impl<'a> YCBlockingQueue<'a> {
     ///
     /// # Examples
     /// ```
-    /// # #[cfg(feature = "futex")] {
+    /// # #[cfg(feature = "blocking")] {
     /// use std::sync::{Mutex, Condvar};
     /// use yep_coc::queue_alloc_helpers::{YCBlockingQueueOwnedData, YCBlockingQueueSharedData};
     /// use yep_coc::{YCQueue, YCBlockingQueue};
@@ -73,7 +73,7 @@ impl<'a> YCBlockingQueue<'a> {
     ///
     /// # Examples
     /// ```
-    /// # #[cfg(feature = "futex")] {
+    /// # #[cfg(feature = "blocking")] {
     /// use std::time::Duration;
     /// use yep_coc::queue_alloc_helpers::YCBlockingQueueOwnedData;
     /// use yep_coc::YCBlockingQueue;
@@ -150,7 +150,7 @@ impl<'a> YCBlockingQueue<'a> {
     ///
     /// # Examples
     /// ```
-    /// # #[cfg(feature = "futex")] {
+    /// # #[cfg(feature = "blocking")] {
     /// use std::time::Duration;
     /// use yep_coc::queue_alloc_helpers::YCBlockingQueueOwnedData;
     /// use yep_coc::YCBlockingQueue;
@@ -195,7 +195,7 @@ impl<'a> YCBlockingQueue<'a> {
     ///
     /// # Examples
     /// ```
-    /// # #[cfg(feature = "futex")] {
+    /// # #[cfg(feature = "blocking")] {
     /// use std::time::Duration;
     /// use yep_coc::queue_alloc_helpers::YCBlockingQueueOwnedData;
     /// use yep_coc::YCBlockingQueue;
@@ -290,7 +290,7 @@ impl<'a> YCBlockingQueue<'a> {
     ///
     /// # Examples
     /// ```
-    /// # #[cfg(feature = "futex")] {
+    /// # #[cfg(feature = "blocking")] {
     /// use std::time::Duration;
     /// use yep_coc::queue_alloc_helpers::YCBlockingQueueOwnedData;
     /// use yep_coc::YCBlockingQueue;
@@ -336,7 +336,7 @@ impl<'a> YCBlockingQueue<'a> {
     ///
     /// # Examples
     /// ```
-    /// # #[cfg(feature = "futex")] {
+    /// # #[cfg(feature = "blocking")] {
     /// use std::time::Duration;
     /// use yep_coc::queue_alloc_helpers::YCBlockingQueueOwnedData;
     /// use yep_coc::YCBlockingQueue;
@@ -373,7 +373,7 @@ impl<'a> YCBlockingQueue<'a> {
     ///
     /// # Examples
     /// ```
-    /// # #[cfg(feature = "futex")] {
+    /// # #[cfg(feature = "blocking")] {
     /// use std::time::Duration;
     /// use yep_coc::queue_alloc_helpers::YCBlockingQueueOwnedData;
     /// use yep_coc::YCBlockingQueue;
@@ -423,7 +423,7 @@ impl<'a> YCBlockingQueue<'a> {
     ///
     /// # Examples
     /// ```
-    /// # #[cfg(feature = "futex")] {
+    /// # #[cfg(feature = "blocking")] {
     /// use std::time::Duration;
     /// use yep_coc::queue_alloc_helpers::YCBlockingQueueOwnedData;
     /// use yep_coc::YCBlockingQueue;
@@ -463,7 +463,7 @@ impl<'a> YCBlockingQueue<'a> {
     ///
     /// # Examples
     /// ```
-    /// # #[cfg(feature = "futex")] {
+    /// # #[cfg(feature = "blocking")] {
     /// use std::time::Duration;
     /// use yep_coc::queue_alloc_helpers::YCBlockingQueueOwnedData;
     /// use yep_coc::YCBlockingQueue;

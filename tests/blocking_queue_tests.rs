@@ -1,4 +1,4 @@
-#[cfg(feature = "futex")]
+#[cfg(feature = "blocking")]
 #[cfg(test)]
 mod blocking_queue_tests {
     use std::collections::HashSet;

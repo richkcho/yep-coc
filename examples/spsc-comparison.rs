@@ -11,8 +11,14 @@ use yep_coc::{
 
 #[cfg(feature = "futex")]
 use yep_coc::{
-    YCFutexQueue, YCBlockingQueue,
-    queue_alloc_helpers::{YCFutexQueueOwnedData, YCFutexQueueSharedData, YCBlockingQueueOwnedData, YCBlockingQueueSharedData},
+    YCFutexQueue,
+    queue_alloc_helpers::{YCFutexQueueOwnedData, YCFutexQueueSharedData},
+};
+
+#[cfg(feature = "blocking")]
+use yep_coc::{
+    YCBlockingQueue,
+    queue_alloc_helpers::{YCBlockingQueueOwnedData, YCBlockingQueueSharedData},
 };
 
 const PATTERN: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -271,7 +277,7 @@ fn run_ycfutexqueue(args: &Args, slot_size: u16, default_message: &str) -> Durat
     end.duration_since(start)
 }
 
-#[cfg(feature = "futex")]
+#[cfg(feature = "blocking")]
 fn run_ycblockingqueue(args: &Args, slot_size: u16, default_message: &str) -> Duration {
     let owned_data = YCBlockingQueueOwnedData::new(args.queue_depth, slot_size);
     let consumer_data = YCBlockingQueueSharedData::from_owned_data(&owned_data);
@@ -628,7 +634,7 @@ fn main() {
     let yc_dur = run_ycqueue(&args, slot_size, default_message);
     #[cfg(feature = "futex")]
     let ycf_dur = run_ycfutexqueue(&args, slot_size, default_message);
-    #[cfg(feature = "futex")]
+    #[cfg(feature = "blocking")]
     let ycb_dur = run_ycblockingqueue(&args, slot_size, default_message);
     let flume_dur = run_flume(&args, slot_size, default_message);
     let mv_dur = run_mutex_vecdeque(&args, slot_size, default_message);
@@ -643,7 +649,7 @@ fn main() {
         "  YCFutexQueue:     {:.3} us",
         ycf_dur.as_nanos() as f64 / 1_000.0
     );
-    #[cfg(feature = "futex")]
+    #[cfg(feature = "blocking")]
     println!(
         "  YCBlockingQueue:  {:.3} us",
         ycb_dur.as_nanos() as f64 / 1_000.0
@@ -660,7 +666,7 @@ fn main() {
     let yc_msgs_per_sec = (args.msg_count as f64) / yc_dur.as_secs_f64();
     #[cfg(feature = "futex")]
     let ycf_msgs_per_sec = (args.msg_count as f64) / ycf_dur.as_secs_f64();
-    #[cfg(feature = "futex")]
+    #[cfg(feature = "blocking")]
     let ycb_msgs_per_sec = (args.msg_count as f64) / ycb_dur.as_secs_f64();
     let flume_msgs_per_sec = (args.msg_count as f64) / flume_dur.as_secs_f64();
     let mv_msgs_per_sec = (args.msg_count as f64) / mv_dur.as_secs_f64();
@@ -668,7 +674,7 @@ fn main() {
     println!("  YCQueue:          {:.2} msgs/s", yc_msgs_per_sec);
     #[cfg(feature = "futex")]
     println!("  YCFutexQueue:     {:.2} msgs/s", ycf_msgs_per_sec);
-    #[cfg(feature = "futex")]
+    #[cfg(feature = "blocking")]
     println!("  YCBlockingQueue:  {:.2} msgs/s", ycb_msgs_per_sec);
     println!("  Flume (bounded):  {:.2} msgs/s", flume_msgs_per_sec);
     println!("  Mutex+VecDeque:   {:.2} msgs/s", mv_msgs_per_sec);
