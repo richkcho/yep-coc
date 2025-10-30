@@ -95,10 +95,12 @@ impl<'a> YCBlockingQueue<'a> {
     ) -> Result<Vec<YCQueueProduceSlot<'a>>, YCQueueError> {
         let start_time = Instant::now();
         loop {
-            // Wait until count < capacity (space available)
+            // Wait until enough space is available
             let mut count_guard = self.count.lock().unwrap();
             let capacity = self.queue.capacity() as i32;
-            while *count_guard >= capacity {
+            let min_required_space = if best_effort { 1 } else { num_slots as i32 };
+            
+            while (capacity - *count_guard) < min_required_space {
                 // Recalculate remaining timeout before each wait
                 let remaining_timeout = match timeout.checked_sub(start_time.elapsed()) {
                     Some(t) => t,
@@ -212,9 +214,11 @@ impl<'a> YCBlockingQueue<'a> {
     ) -> Result<Vec<YCQueueConsumeSlot<'a>>, YCQueueError> {
         let start_time = Instant::now();
         loop {
-            // Wait until count > 0 (data available)
+            // Wait until enough data is available
             let mut count_guard = self.count.lock().unwrap();
-            while *count_guard <= 0 {
+            let min_required_count = if best_effort { 1 } else { num_slots as i32 };
+            
+            while *count_guard < min_required_count {
                 // Recalculate remaining timeout before each wait
                 let remaining_timeout = match timeout.checked_sub(start_time.elapsed()) {
                     Some(t) => t,
