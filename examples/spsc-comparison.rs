@@ -180,42 +180,42 @@ fn run_ycfutexqueue(args: &Args, slot_size: u16, default_message: &str) -> Durat
             let end_time = Arc::clone(&end_time);
             let barrier = Arc::clone(&barrier);
             s.spawn(move || {
-            // Wait for both threads to be ready
-            barrier.wait();
+                // Wait for both threads to be ready
+                barrier.wait();
 
-            let mut messages_received = 0u32;
-            while messages_received < args.msg_count {
-                match consumer_queue.get_consume_slot(timeout, Duration::ZERO) {
-                    Ok(consume_slot) => {
-                        // Optional validation
-                        if args.msg_check_len > 0 {
-                            for i in 0..args.msg_check_len as usize {
-                                let expected = PATTERN.as_bytes()
-                                    [(messages_received as usize + i) % PATTERN.len()];
-                                let got = consume_slot.data[i];
-                                if expected != got {
-                                    panic!(
-                                        "YCFutexQueue mismatch at message {}, byte {}: expected '{}' got '{}'",
-                                        messages_received, i, expected, got
-                                    );
+                let mut messages_received = 0u32;
+                while messages_received < args.msg_count {
+                    match consumer_queue.get_consume_slot(timeout, Duration::ZERO) {
+                        Ok(consume_slot) => {
+                            // Optional validation
+                            if args.msg_check_len > 0 {
+                                for i in 0..args.msg_check_len as usize {
+                                    let expected = PATTERN.as_bytes()
+                                        [(messages_received as usize + i) % PATTERN.len()];
+                                    let got = consume_slot.data[i];
+                                    if expected != got {
+                                        panic!(
+                                            "YCFutexQueue mismatch at message {}, byte {}: expected '{}' got '{}'",
+                                            messages_received, i, expected, got
+                                        );
+                                    }
                                 }
                             }
-                        }
 
-                        if args.verbose {
-                            let s = str_from_u8(consume_slot.data);
-                            println!("YCFutexQueue recv: {s}");
-                        }
+                            if args.verbose {
+                                let s = str_from_u8(consume_slot.data);
+                                println!("YCFutexQueue recv: {s}");
+                            }
 
-                        consumer_queue.mark_slot_consumed(consume_slot).unwrap();
-                        messages_received += 1;
+                            consumer_queue.mark_slot_consumed(consume_slot).unwrap();
+                            messages_received += 1;
+                        }
+                        Err(YCQueueError::Timeout) => {
+                            thread::yield_now();
+                        }
+                        Err(e) => panic!("YCFutexQueue consumer error: {e:?}"),
                     }
-                    Err(YCQueueError::Timeout) => {
-                        thread::yield_now();
-                    }
-                    Err(e) => panic!("YCFutexQueue consumer error: {e:?}"),
                 }
-            }
                 *end_time.lock().unwrap() = Some(Instant::now());
             });
         }
