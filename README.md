@@ -37,3 +37,25 @@ fn main() {
 ```
 
 For more complete examples, check `examples/simple-send-recv.rs` and `examples/multi-send-recv.rs`.
+
+## Benchmarks
+
+The repository includes Criterion-based benchmarks for measuring SPSC queue throughput:
+
+```bash
+# Run all SPSC throughput benchmarks
+cargo bench --bench spsc_throughput
+
+# Run a specific benchmark
+cargo bench --bench spsc_throughput -- cap512_payload64_batch8
+
+# Generate HTML reports (located in target/criterion/)
+cargo bench --bench spsc_throughput -- --save-baseline my-baseline
+```
+
+The SPSC throughput benchmark measures steady-state performance with:
+- Thread pinning to separate CPU cores (avoiding SMT siblings)
+- NUMA-aware allocation (queue created after thread pinning)
+- Synchronized start with barrier synchronization
+- Support for single-slot and batched operations
+- Parameter sweeps across capacities (256, 512, 2048), payload sizes (8, 64, 128 bytes), and batch sizes (1, 8, 32)
