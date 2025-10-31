@@ -88,7 +88,7 @@ fn bench_spsc_throughput(c: &mut Criterion, params: BenchParams) {
     let (producer_core, consumer_core) = select_cores();
 
     group.bench_with_input(
-        BenchmarkId::from_parameter(&params.id()),
+        BenchmarkId::from_parameter(params.id()),
         &params,
         |b, params| {
             b.iter_custom(|iters| {
@@ -302,9 +302,8 @@ fn spsc_throughput_benchmarks(c: &mut Criterion) {
             if (*capacity as u32) * (*payload_size as u32) >= 65536 {
                 continue;
             }
-            
-            for batch_size in &batch_sizes {
 
+            for batch_size in &batch_sizes {
                 let params = BenchParams {
                     capacity: *capacity,
                     payload_size: *payload_size,
