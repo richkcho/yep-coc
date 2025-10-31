@@ -21,8 +21,8 @@
 //!
 //! # Configuration
 //! - Measurement time: 3 seconds per benchmark
-//! - Sample size: 20 measurements
-//! - Throughput reported in bytes/second
+//! - Sample size: 50 measurements
+//! - Throughput reported in messages/second
 
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use std::sync::{Arc, Barrier};
@@ -79,11 +79,11 @@ fn bench_spsc_throughput(c: &mut Criterion, params: BenchParams) {
 
     // Configure Criterion
     group.measurement_time(Duration::from_secs(3));
-    group.sample_size(20);
+    group.sample_size(50);
 
-    // Set throughput metric in bytes
-    let total_bytes = params.capacity as u64 * params.payload_size as u64;
-    group.throughput(Throughput::Bytes(total_bytes));
+    // Set throughput metric in messages (elements)
+    let total_messages = params.capacity as u64;
+    group.throughput(Throughput::Elements(total_messages));
 
     let (producer_core, consumer_core) = select_cores();
 
@@ -290,27 +290,20 @@ fn bench_spsc_throughput(c: &mut Criterion, params: BenchParams) {
 /// Main benchmark entry point
 fn spsc_throughput_benchmarks(c: &mut Criterion) {
     // Define parameter sweep
-    // Note: capacity * payload_size must be < 65536 (u16) to avoid u16 overflow in the queue implementation
-    let capacities = vec![32, 512, 1024];
+    // Note: capacity * payload_size must be < 65536 to avoid u16 overflow in the queue implementation
+    let capacities = vec![256, 512, 2048];
     let payload_sizes = vec![8, 64, 128];
-    let batch_sizes = vec![1, 8, 64];
-
-    for c in capacities.iter() {
-        for p in payload_sizes.iter() {
-            assert!(
-                (*c as u32) * (*p as u32) < u16::MAX as u32,
-                "capacity * payload_size must fit in u16"
-            );
-        }
-    }
+    let batch_sizes = vec![1, 8, 32];
 
     for capacity in &capacities {
         for payload_size in &payload_sizes {
+            // Skip combinations that would overflow in queue allocation
+            // Note: batch_size doesn't affect queue size, only API call batching
+            if (*capacity as u32) * (*payload_size as u32) >= 65536 {
+                continue;
+            }
+            
             for batch_size in &batch_sizes {
-                // no real point in testing batch sizes larger than capacity
-                if batch_size > capacity {
-                    continue;
-                }
 
                 let params = BenchParams {
                     capacity: *capacity,
