@@ -6,7 +6,7 @@ cfg_if::cfg_if! {
 }
 
 cfg_if::cfg_if! {
-    if #[cfg(feature = "blocking")] {
+    if #[cfg(feature = "mutex")] {
         use std::sync::{Condvar, Mutex};
         use crate::YCMutexQueue;
     }
@@ -202,7 +202,7 @@ impl<'a> YCFutexQueue<'a> {
     }
 }
 
-#[cfg(feature = "blocking")]
+#[cfg(feature = "mutex")]
 #[derive(Debug)]
 pub struct YCMutexQueueOwnedData {
     pub data: YCQueueOwnedData,
@@ -210,7 +210,7 @@ pub struct YCMutexQueueOwnedData {
     pub condvar: Condvar,
 }
 
-#[cfg(feature = "blocking")]
+#[cfg(feature = "mutex")]
 impl YCMutexQueueOwnedData {
     pub fn new(slot_count_u16: u16, slot_size_u16: u16) -> YCMutexQueueOwnedData {
         let data = YCQueueOwnedData::new(slot_count_u16, slot_size_u16);
@@ -225,7 +225,7 @@ impl YCMutexQueueOwnedData {
     }
 }
 
-#[cfg(feature = "blocking")]
+#[cfg(feature = "mutex")]
 #[derive(Debug)]
 pub struct YCMutexQueueSharedData<'a> {
     pub data: YCQueueSharedData<'a>,
@@ -233,7 +233,7 @@ pub struct YCMutexQueueSharedData<'a> {
     pub condvar: &'a Condvar,
 }
 
-#[cfg(feature = "blocking")]
+#[cfg(feature = "mutex")]
 impl<'a> YCMutexQueueSharedData<'a> {
     pub fn from_owned_data(
         blocking_queue: &'a YCMutexQueueOwnedData,
@@ -250,7 +250,7 @@ impl<'a> YCMutexQueueSharedData<'a> {
     }
 }
 
-#[cfg(feature = "blocking")]
+#[cfg(feature = "mutex")]
 impl<'a> YCMutexQueue<'a> {
     pub fn from_shared_data(
         shared: YCMutexQueueSharedData<'a>,
@@ -414,7 +414,7 @@ mod queue_alloc_helpers_tests {
         assert_eq!(owned.count.load(Ordering::Acquire), 77);
     }
 
-    #[cfg(feature = "blocking")]
+    #[cfg(feature = "mutex")]
     #[test]
     fn test_blocking_shared_queue_and_counter() {
         let slot_count: u16 = 4;

@@ -15,7 +15,7 @@ use yep_coc::{
     queue_alloc_helpers::{YCFutexQueueOwnedData, YCFutexQueueSharedData},
 };
 
-#[cfg(feature = "blocking")]
+#[cfg(feature = "mutex")]
 use yep_coc::{
     YCMutexQueue,
     queue_alloc_helpers::{YCMutexQueueOwnedData, YCMutexQueueSharedData},
@@ -277,7 +277,7 @@ fn run_ycfutexqueue(args: &Args, slot_size: u16, default_message: &str) -> Durat
     end.duration_since(start)
 }
 
-#[cfg(feature = "blocking")]
+#[cfg(feature = "mutex")]
 fn run_ycmutexqueue(args: &Args, slot_size: u16, default_message: &str) -> Duration {
     let owned_data = YCMutexQueueOwnedData::new(args.queue_depth, slot_size);
     let consumer_data = YCMutexQueueSharedData::from_owned_data(&owned_data);
@@ -646,7 +646,7 @@ fn main() {
     let yc_dur = run_ycqueue(&args, slot_size, default_message);
     #[cfg(feature = "futex")]
     let ycf_dur = run_ycfutexqueue(&args, slot_size, default_message);
-    #[cfg(feature = "blocking")]
+    #[cfg(feature = "mutex")]
     let ycb_dur = run_ycmutexqueue(&args, slot_size, default_message);
     let flume_dur = run_flume(&args, slot_size, default_message);
     let mv_dur = run_mutex_vecdeque(&args, slot_size, default_message);
@@ -661,7 +661,7 @@ fn main() {
         "  YCFutexQueue:     {:.3} us",
         ycf_dur.as_nanos() as f64 / 1_000.0
     );
-    #[cfg(feature = "blocking")]
+    #[cfg(feature = "mutex")]
     println!(
         "  YCMutexQueue:  {:.3} us",
         ycb_dur.as_nanos() as f64 / 1_000.0
@@ -678,7 +678,7 @@ fn main() {
     let yc_msgs_per_sec = (args.msg_count as f64) / yc_dur.as_secs_f64();
     #[cfg(feature = "futex")]
     let ycf_msgs_per_sec = (args.msg_count as f64) / ycf_dur.as_secs_f64();
-    #[cfg(feature = "blocking")]
+    #[cfg(feature = "mutex")]
     let ycb_msgs_per_sec = (args.msg_count as f64) / ycb_dur.as_secs_f64();
     let flume_msgs_per_sec = (args.msg_count as f64) / flume_dur.as_secs_f64();
     let mv_msgs_per_sec = (args.msg_count as f64) / mv_dur.as_secs_f64();
@@ -692,7 +692,7 @@ fn main() {
         "  YCFutexQueue:     {}msgs/s",
         format_with_si_prefix(ycf_msgs_per_sec)
     );
-    #[cfg(feature = "blocking")]
+    #[cfg(feature = "mutex")]
     println!(
         "  YCMutexQueue:  {}msgs/s",
         format_with_si_prefix(ycb_msgs_per_sec)

@@ -4,6 +4,6 @@ pub enum YCQueueError {
     OutOfSpace,
     EmptyQueue,
     SlotNotReady,
-    #[cfg(any(feature = "futex", feature = "blocking"))]
+    #[cfg(any(feature = "futex", feature = "mutex"))]
     Timeout,
 }

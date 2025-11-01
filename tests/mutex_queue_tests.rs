@@ -1,4 +1,4 @@
-#[cfg(feature = "blocking")]
+#[cfg(feature = "mutex")]
 #[cfg(test)]
 mod blocking_queue_tests {
     use std::collections::HashSet;

@@ -34,7 +34,7 @@ impl<'a> YCMutexQueue<'a> {
     ///
     /// # Examples
     /// ```
-    /// # #[cfg(feature = "blocking")] {
+    /// # #[cfg(feature = "mutex")] {
     /// use std::sync::{Mutex, Condvar};
     /// use yep_coc::queue_alloc_helpers::{YCMutexQueueOwnedData, YCMutexQueueSharedData};
     /// use yep_coc::{YCQueue, YCMutexQueue};
@@ -72,7 +72,7 @@ impl<'a> YCMutexQueue<'a> {
     ///
     /// # Examples
     /// ```
-    /// # #[cfg(feature = "blocking")] {
+    /// # #[cfg(feature = "mutex")] {
     /// use std::time::Duration;
     /// use yep_coc::queue_alloc_helpers::YCMutexQueueOwnedData;
     /// use yep_coc::YCMutexQueue;
@@ -145,7 +145,7 @@ impl<'a> YCMutexQueue<'a> {
     ///
     /// # Examples
     /// ```
-    /// # #[cfg(feature = "blocking")] {
+    /// # #[cfg(feature = "mutex")] {
     /// use std::time::Duration;
     /// use yep_coc::queue_alloc_helpers::YCMutexQueueOwnedData;
     /// use yep_coc::YCMutexQueue;
@@ -188,7 +188,7 @@ impl<'a> YCMutexQueue<'a> {
     ///
     /// # Examples
     /// ```
-    /// # #[cfg(feature = "blocking")] {
+    /// # #[cfg(feature = "mutex")] {
     /// use std::time::Duration;
     /// use yep_coc::queue_alloc_helpers::YCMutexQueueOwnedData;
     /// use yep_coc::YCMutexQueue;
@@ -286,7 +286,7 @@ impl<'a> YCMutexQueue<'a> {
     ///
     /// # Examples
     /// ```
-    /// # #[cfg(feature = "blocking")] {
+    /// # #[cfg(feature = "mutex")] {
     /// use std::time::Duration;
     /// use yep_coc::queue_alloc_helpers::YCMutexQueueOwnedData;
     /// use yep_coc::YCMutexQueue;
@@ -331,7 +331,7 @@ impl<'a> YCMutexQueue<'a> {
     ///
     /// # Examples
     /// ```
-    /// # #[cfg(feature = "blocking")] {
+    /// # #[cfg(feature = "mutex")] {
     /// use std::time::Duration;
     /// use yep_coc::queue_alloc_helpers::YCMutexQueueOwnedData;
     /// use yep_coc::YCMutexQueue;
@@ -375,7 +375,7 @@ impl<'a> YCMutexQueue<'a> {
     ///
     /// # Examples
     /// ```
-    /// # #[cfg(feature = "blocking")] {
+    /// # #[cfg(feature = "mutex")] {
     /// use std::time::Duration;
     /// use yep_coc::queue_alloc_helpers::YCMutexQueueOwnedData;
     /// use yep_coc::YCMutexQueue;
@@ -432,7 +432,7 @@ impl<'a> YCMutexQueue<'a> {
     ///
     /// # Examples
     /// ```
-    /// # #[cfg(feature = "blocking")] {
+    /// # #[cfg(feature = "mutex")] {
     /// use std::time::Duration;
     /// use yep_coc::queue_alloc_helpers::YCMutexQueueOwnedData;
     /// use yep_coc::YCMutexQueue;
@@ -472,7 +472,7 @@ impl<'a> YCMutexQueue<'a> {
     ///
     /// # Examples
     /// ```
-    /// # #[cfg(feature = "blocking")] {
+    /// # #[cfg(feature = "mutex")] {
     /// use std::time::Duration;
     /// use yep_coc::queue_alloc_helpers::YCMutexQueueOwnedData;
     /// use yep_coc::YCMutexQueue;
