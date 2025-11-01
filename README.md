@@ -66,19 +66,19 @@ fn main() {
 }
 ```
 
-## YCBlockingQueue Example
+## YCMutexQueue Example
 
-The `YCBlockingQueue` provides similar blocking capabilities using standard library primitives (Mutex and CondVar) and is enabled with the `blocking` feature:
+The `YCMutexQueue` provides similar blocking capabilities using standard library primitives (Mutex and CondVar) and is enabled with the `mutex` feature:
 
 ```rust
 use std::time::Duration;
-use yep_coc::queue_alloc_helpers::YCBlockingQueueOwnedData;
-use yep_coc::YCBlockingQueue;
+use yep_coc::queue_alloc_helpers::YCMutexQueueOwnedData;
+use yep_coc::YCMutexQueue;
 
 fn main() {
     // Allocate backing storage for 4 slots of 128 bytes each.
-    let owned = YCBlockingQueueOwnedData::new(4, 128);
-    let mut queue = YCBlockingQueue::from_owned_data(&owned).expect("queue");
+    let owned = YCMutexQueueOwnedData::new(4, 128);
+    let mut queue = YCMutexQueue::from_owned_data(&owned).expect("queue");
     
     let timeout = Duration::from_millis(100);
     
