@@ -198,9 +198,7 @@ mod futex_queue_tests {
                     .spawn_scoped(s, move || {
                         let mut id = counter.fetch_add(1, Ordering::AcqRel);
                         while id < max_messages {
-                            match produce_queue
-                                .get_produce_slot(DEFAULT_SMALL_TIMEOUT)
-                            {
+                            match produce_queue.get_produce_slot(DEFAULT_SMALL_TIMEOUT) {
                                 Ok(produce_slot) => {
                                     let produce_str = format!("hello-{id}");
                                     copy_str_to_slice(&produce_str, &mut *produce_slot.data);

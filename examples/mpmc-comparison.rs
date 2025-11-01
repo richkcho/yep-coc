@@ -1209,12 +1209,7 @@ fn run_flume(args: &Args, slot_size: u16, default_message: &str) -> Duration {
 }
 
 fn format_with_si_prefix(value: f64) -> String {
-    let prefixes = [
-        (1e12, "T"),
-        (1e9, "G"),
-        (1e6, "M"),
-        (1e3, "K"),
-    ];
+    let prefixes = [(1e12, "T"), (1e9, "G"), (1e6, "M"), (1e3, "K")];
 
     for (threshold, prefix) in prefixes {
         if value >= threshold {
@@ -1304,11 +1299,26 @@ fn main() {
     let flume_msgs_per_sec = (args.msg_count as f64) / flume_dur.as_secs_f64();
     let mv_msgs_per_sec = (args.msg_count as f64) / mv_dur.as_secs_f64();
     println!("\nThroughput:");
-    println!("  YCQueue:          {}msgs/s", format_with_si_prefix(yc_msgs_per_sec));
+    println!(
+        "  YCQueue:          {}msgs/s",
+        format_with_si_prefix(yc_msgs_per_sec)
+    );
     #[cfg(feature = "futex")]
-    println!("  YCFutexQueue:     {}msgs/s", format_with_si_prefix(ycf_msgs_per_sec));
+    println!(
+        "  YCFutexQueue:     {}msgs/s",
+        format_with_si_prefix(ycf_msgs_per_sec)
+    );
     #[cfg(feature = "blocking")]
-    println!("  YCBlockingQueue:  {}msgs/s", format_with_si_prefix(ycb_msgs_per_sec));
-    println!("  Flume (bounded):  {}msgs/s", format_with_si_prefix(flume_msgs_per_sec));
-    println!("  Mutex+VecDeque:   {}msgs/s", format_with_si_prefix(mv_msgs_per_sec));
+    println!(
+        "  YCBlockingQueue:  {}msgs/s",
+        format_with_si_prefix(ycb_msgs_per_sec)
+    );
+    println!(
+        "  Flume (bounded):  {}msgs/s",
+        format_with_si_prefix(flume_msgs_per_sec)
+    );
+    println!(
+        "  Mutex+VecDeque:   {}msgs/s",
+        format_with_si_prefix(mv_msgs_per_sec)
+    );
 }
