@@ -248,11 +248,18 @@ impl<'a> YCBlockingQueue<'a> {
                      * a non-zero count when there are slots to consume. Note: in rare race conditions between multiple
                      * consumers, the count may temporarily go slightly negative, which is acceptable.
                      */
-                    let mut count = self.count.lock().unwrap();
-                    *count -= slots.len() as i32;
-                    drop(count);
-                    // Wake any producers that might be waiting for capacity.
-                    self.condvar.notify_all();
+                    let slots_freed = slots.len() as i32;
+                    {
+                        let mut count = self.count.lock().unwrap();
+                        *count -= slots_freed;
+                    }
+                    // Wake producers waiting for capacity. For small releases, wake a single waiter,
+                    // but ensure we notify everyone if we return a large batch.
+                    if slots_freed > 1 {
+                        self.condvar.notify_all();
+                    } else {
+                        self.condvar.notify_one();
+                    }
                     return Ok(slots);
                 }
                 Err(_) => {
@@ -339,12 +346,19 @@ impl<'a> YCBlockingQueue<'a> {
     /// # }
     /// ```
     pub fn mark_slot_produced(&mut self, slot: YCQueueProduceSlot<'a>) -> Result<(), YCQueueError> {
-        let mut count = self.count.lock().unwrap();
-        debug_assert!(*count >= 0);
-        *count += 1;
-        drop(count);
+        let was_empty = {
+            let mut count = self.count.lock().unwrap();
+            debug_assert!(*count >= 0);
+            let was_empty = *count == 0;
+            *count += 1;
+            was_empty
+        };
         self.queue.mark_slot_produced(slot)?;
-        self.condvar.notify_all();
+        if was_empty {
+            self.condvar.notify_all();
+        } else {
+            self.condvar.notify_one();
+        }
         Ok(())
     }
 
@@ -385,12 +399,19 @@ impl<'a> YCBlockingQueue<'a> {
         }
 
         let num_produced = slots.len() as i32;
-        let mut count = self.count.lock().unwrap();
-        debug_assert!(*count >= 0);
-        *count += num_produced;
-        drop(count);
+        let old_count = {
+            let mut count = self.count.lock().unwrap();
+            debug_assert!(*count >= 0);
+            let old = *count;
+            *count += num_produced;
+            old
+        };
         self.queue.mark_slots_produced(slots)?;
-        self.condvar.notify_all();
+        if num_produced > 1 || old_count == 0 {
+            self.condvar.notify_all();
+        } else {
+            self.condvar.notify_one();
+        }
         Ok(())
     }
 
