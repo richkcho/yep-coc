@@ -1,6 +1,6 @@
 # yep-coc
 
-[![Crates.io](https://img.shields.io/crates/v/yep-coc.svg)](https://crates.io/crates/yep-coc) [![Documentation](https://docs.rs/yep-coc/badge.svg)](https://docs.rs/yep-coc) [![Rust](https://github.com/richkcho/yep-coc/actions/workflows/rust.yml/badge.svg)](https://github.com/richkcho/yep-coc/actions/workflows/rust.yml)
+[![Crates.io](https://img.shields.io/crates/v/yep-coc.svg)](https://crates.io/crates/yep-coc) [![Documentation](https://docs.rs/yep-coc/badge.svg)](https://docs.rs/yep-coc) [![CI](https://github.com/richkcho/yep-coc/actions/workflows/ci.yml/badge.svg)](https://github.com/richkcho/yep-coc/actions/workflows/ci.yml)
 
 ## Overview
 - Multi-producer, multi-consumer lock-free queue built for zero-copy data paths.
@@ -36,7 +36,63 @@ fn main() {
 }
 ```
 
-For more complete examples, check `examples/simple-send-recv.rs` and `examples/multi-send-recv.rs`.
+For more complete examples, check `examples/spsc-send-recv.rs` and `examples/mpmc-send-recv.rs`.
+
+## YCFutexQueue Example
+
+The `YCFutexQueue` provides a blocking queue using futex-based synchronization (enabled with the `futex` feature). This allows producers and consumers to efficiently wait for space or data without busy-waiting:
+
+```rust
+use std::time::Duration;
+use yep_coc::queue_alloc_helpers::YCFutexQueueOwnedData;
+use yep_coc::YCFutexQueue;
+
+fn main() {
+    // Allocate backing storage for 4 slots of 128 bytes each.
+    let owned = YCFutexQueueOwnedData::new(4, 128);
+    let mut queue = YCFutexQueue::from_owned_data(&owned).expect("queue");
+    
+    let timeout = Duration::from_millis(100);
+    
+    // Producer: reserve a slot, write data, then publish it.
+    let mut slot = queue.get_produce_slot(timeout).expect("produce slot");
+    slot.data[..5].copy_from_slice(b"hello");
+    queue.mark_slot_produced(slot).expect("publish");
+    
+    // Consumer: wait for and take a slot, read the data, and return it.
+    let slot = queue.get_consume_slot(timeout).expect("consume slot");
+    assert_eq!(&slot.data[..5], b"hello");
+    queue.mark_slot_consumed(slot).expect("reclaim");
+}
+```
+
+## YCBlockingQueue Example
+
+The `YCBlockingQueue` provides similar blocking capabilities using standard library primitives (Mutex and CondVar) and is enabled with the `blocking` feature:
+
+```rust
+use std::time::Duration;
+use yep_coc::queue_alloc_helpers::YCBlockingQueueOwnedData;
+use yep_coc::YCBlockingQueue;
+
+fn main() {
+    // Allocate backing storage for 4 slots of 128 bytes each.
+    let owned = YCBlockingQueueOwnedData::new(4, 128);
+    let mut queue = YCBlockingQueue::from_owned_data(&owned).expect("queue");
+    
+    let timeout = Duration::from_millis(100);
+    
+    // Producer: reserve a slot, write data, then publish it.
+    let mut slot = queue.get_produce_slot(timeout).expect("produce slot");
+    slot.data[..5].copy_from_slice(b"hello");
+    queue.mark_slot_produced(slot).expect("publish");
+    
+    // Consumer: wait for and take a slot, read the data, and return it.
+    let slot = queue.get_consume_slot(timeout).expect("consume slot");
+    assert_eq!(&slot.data[..5], b"hello");
+    queue.mark_slot_consumed(slot).expect("reclaim");
+}
+```
 
 ## Benchmarks
 
