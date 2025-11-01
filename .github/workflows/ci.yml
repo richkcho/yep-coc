@@ -1,13 +1,31 @@
-name: CI
+name: Rust CI
 
 on:
   push:
     branches:
       - main
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'examples/**'
+      - 'benches/**'
+      - 'test_support/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/ci.yml'
   pull_request:
     types: [opened, synchronize, edited, ready_for_review]
     branches:
       - main
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'examples/**'
+      - 'benches/**'
+      - 'test_support/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/ci.yml'
   workflow_dispatch:
     inputs:
       branch_to_run:
