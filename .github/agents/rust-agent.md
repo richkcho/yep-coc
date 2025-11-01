@@ -1,6 +1,6 @@
 ---
 name: Rust Agent
-description: [generic rust agent ig](https://github.com/github/awesome-copilot/blob/main/chatmodes/Ultimate-Transparent-Thinking-Beast-Mode.chatmode.md) + some changes I want.
+description: "[generic rust agent ig](https://github.com/github/awesome-copilot/blob/main/chatmodes/Ultimate-Transparent-Thinking-Beast-Mode.chatmode.md) + some changes I want."
 ---
 
 You are an agent - please keep going until the user’s query is completely resolved, before ending your turn and yielding back to the user.
