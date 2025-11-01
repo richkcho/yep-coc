@@ -8,7 +8,7 @@ cfg_if::cfg_if! {
 cfg_if::cfg_if! {
     if #[cfg(feature = "blocking")] {
         use std::sync::{Condvar, Mutex};
-        use crate::YCBlockingQueue;
+        use crate::YCMutexQueue;
     }
 }
 
@@ -204,20 +204,20 @@ impl<'a> YCFutexQueue<'a> {
 
 #[cfg(feature = "blocking")]
 #[derive(Debug)]
-pub struct YCBlockingQueueOwnedData {
+pub struct YCMutexQueueOwnedData {
     pub data: YCQueueOwnedData,
     pub count: Mutex<i32>,
     pub condvar: Condvar,
 }
 
 #[cfg(feature = "blocking")]
-impl YCBlockingQueueOwnedData {
-    pub fn new(slot_count_u16: u16, slot_size_u16: u16) -> YCBlockingQueueOwnedData {
+impl YCMutexQueueOwnedData {
+    pub fn new(slot_count_u16: u16, slot_size_u16: u16) -> YCMutexQueueOwnedData {
         let data = YCQueueOwnedData::new(slot_count_u16, slot_size_u16);
         let count = Mutex::new(0);
         let condvar = Condvar::new();
 
-        YCBlockingQueueOwnedData {
+        YCMutexQueueOwnedData {
             data,
             count,
             condvar,
@@ -227,22 +227,22 @@ impl YCBlockingQueueOwnedData {
 
 #[cfg(feature = "blocking")]
 #[derive(Debug)]
-pub struct YCBlockingQueueSharedData<'a> {
+pub struct YCMutexQueueSharedData<'a> {
     pub data: YCQueueSharedData<'a>,
     pub count: &'a Mutex<i32>,
     pub condvar: &'a Condvar,
 }
 
 #[cfg(feature = "blocking")]
-impl<'a> YCBlockingQueueSharedData<'a> {
+impl<'a> YCMutexQueueSharedData<'a> {
     pub fn from_owned_data(
-        blocking_queue: &'a YCBlockingQueueOwnedData,
-    ) -> YCBlockingQueueSharedData<'a> {
+        blocking_queue: &'a YCMutexQueueOwnedData,
+    ) -> YCMutexQueueSharedData<'a> {
         let data = YCQueueSharedData::from_owned_data(&blocking_queue.data);
         let count = &blocking_queue.count;
         let condvar = &blocking_queue.condvar;
 
-        YCBlockingQueueSharedData {
+        YCMutexQueueSharedData {
             data,
             count,
             condvar,
@@ -251,13 +251,13 @@ impl<'a> YCBlockingQueueSharedData<'a> {
 }
 
 #[cfg(feature = "blocking")]
-impl<'a> YCBlockingQueue<'a> {
+impl<'a> YCMutexQueue<'a> {
     pub fn from_shared_data(
-        shared: YCBlockingQueueSharedData<'a>,
-    ) -> Result<YCBlockingQueue<'a>, YCQueueError> {
+        shared: YCMutexQueueSharedData<'a>,
+    ) -> Result<YCMutexQueue<'a>, YCQueueError> {
         let queue = YCQueue::new(shared.data.meta, shared.data.data)?;
 
-        Ok(YCBlockingQueue {
+        Ok(YCMutexQueue {
             queue,
             count: shared.count,
             condvar: shared.condvar,
@@ -265,11 +265,11 @@ impl<'a> YCBlockingQueue<'a> {
     }
 
     pub fn from_owned_data(
-        owned: &'a YCBlockingQueueOwnedData,
-    ) -> Result<YCBlockingQueue<'a>, YCQueueError> {
+        owned: &'a YCMutexQueueOwnedData,
+    ) -> Result<YCMutexQueue<'a>, YCQueueError> {
         let queue = YCQueue::from_owned_data(&owned.data)?;
 
-        Ok(YCBlockingQueue {
+        Ok(YCMutexQueue {
             queue,
             count: &owned.count,
             condvar: &owned.condvar,
@@ -420,7 +420,7 @@ mod queue_alloc_helpers_tests {
         let slot_count: u16 = 4;
         let slot_size: u16 = 16;
 
-        let mut owned = YCBlockingQueueOwnedData::new(slot_count, slot_size);
+        let mut owned = YCMutexQueueOwnedData::new(slot_count, slot_size);
 
         // Seed underlying queue data through owned handle.
         for (idx, byte) in owned.data.data.iter_mut().enumerate() {
@@ -429,7 +429,7 @@ mod queue_alloc_helpers_tests {
 
         let data_len = owned.data.data.len();
         {
-            let shared = YCBlockingQueueSharedData::from_owned_data(&owned);
+            let shared = YCMutexQueueSharedData::from_owned_data(&owned);
             let data = shared.data.data;
             assert_eq!(data, owned.data.data.as_slice());
 
@@ -444,7 +444,7 @@ mod queue_alloc_helpers_tests {
         owned.data.data[1] = 0xCC;
         owned.data.data[data_len / 2] = 0xDD;
         {
-            let shared_again = YCBlockingQueueSharedData::from_owned_data(&owned);
+            let shared_again = YCMutexQueueSharedData::from_owned_data(&owned);
             let data_again = shared_again.data.data;
             assert_eq!(data_again[1], 0xCC);
             assert_eq!(data_again[data_again.len() / 2], 0xDD);
@@ -453,7 +453,7 @@ mod queue_alloc_helpers_tests {
         // Verify the mutex counter is shared.
         *owned.count.lock().unwrap() = 123;
         {
-            let shared = YCBlockingQueueSharedData::from_owned_data(&owned);
+            let shared = YCMutexQueueSharedData::from_owned_data(&owned);
             assert_eq!(*shared.count.lock().unwrap(), 123);
 
             *shared.count.lock().unwrap() = 77;

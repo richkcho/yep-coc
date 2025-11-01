@@ -18,8 +18,8 @@ use yep_coc::{
 
 #[cfg(feature = "blocking")]
 use yep_coc::{
-    YCBlockingQueue,
-    queue_alloc_helpers::{YCBlockingQueueOwnedData, YCBlockingQueueSharedData},
+    YCMutexQueue,
+    queue_alloc_helpers::{YCMutexQueueOwnedData, YCMutexQueueSharedData},
 };
 
 const PATTERN: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -534,21 +534,21 @@ fn run_ycfutexqueue(args: &Args, slot_size: u16, default_message: &str) -> Durat
 }
 
 #[cfg(feature = "blocking")]
-fn run_ycblockingqueue(args: &Args, slot_size: u16, default_message: &str) -> Duration {
+fn run_ycmutexqueue(args: &Args, slot_size: u16, default_message: &str) -> Duration {
     let validation_len = if args.msg_check_len > 0 {
         std::cmp::max(args.msg_check_len, INDEX_PREFIX_LEN as u16)
     } else {
         0
     };
 
-    let owned_data = YCBlockingQueueOwnedData::new(args.queue_depth, slot_size);
+    let owned_data = YCMutexQueueOwnedData::new(args.queue_depth, slot_size);
 
     let mut producer_queues = Vec::with_capacity(args.producer_threads as usize);
     let mut consumer_queues = Vec::with_capacity(args.consumer_threads as usize);
 
     for _ in 0..args.producer_threads {
-        let shared = YCBlockingQueueSharedData::from_owned_data(&owned_data);
-        producer_queues.push(YCBlockingQueue::new(
+        let shared = YCMutexQueueSharedData::from_owned_data(&owned_data);
+        producer_queues.push(YCMutexQueue::new(
             YCQueue::new(shared.data.meta, shared.data.data).unwrap(),
             shared.count,
             shared.condvar,
@@ -556,8 +556,8 @@ fn run_ycblockingqueue(args: &Args, slot_size: u16, default_message: &str) -> Du
     }
 
     for _ in 0..args.consumer_threads {
-        let shared = YCBlockingQueueSharedData::from_owned_data(&owned_data);
-        consumer_queues.push(YCBlockingQueue::new(
+        let shared = YCMutexQueueSharedData::from_owned_data(&owned_data);
+        consumer_queues.push(YCMutexQueue::new(
             YCQueue::new(shared.data.meta, shared.data.data).unwrap(),
             shared.count,
             shared.condvar,
@@ -636,7 +636,7 @@ fn run_ycblockingqueue(args: &Args, slot_size: u16, default_message: &str) -> Du
                                 }
 
                                 if verbose {
-                                    println!("YCBlockingQueue send: {}", str_from_u8(slot.data));
+                                    println!("YCMutexQueue send: {}", str_from_u8(slot.data));
                                 }
 
                                 queue.mark_slot_produced(slot).unwrap();
@@ -645,7 +645,7 @@ fn run_ycblockingqueue(args: &Args, slot_size: u16, default_message: &str) -> Du
                             Err(YCQueueError::Timeout) => {
                                 thread::yield_now();
                             }
-                            Err(e) => panic!("YCBlockingQueue producer error: {e:?}"),
+                            Err(e) => panic!("YCMutexQueue producer error: {e:?}"),
                         }
                     }
                 }
@@ -694,7 +694,7 @@ fn run_ycblockingqueue(args: &Args, slot_size: u16, default_message: &str) -> Du
 
                             if verbose {
                                 let s = str_from_u8(slot.data);
-                                println!("YCBlockingQueue recv: {s}");
+                                println!("YCMutexQueue recv: {s}");
                             }
 
                             queue.mark_slot_consumed(slot).unwrap();
@@ -702,7 +702,7 @@ fn run_ycblockingqueue(args: &Args, slot_size: u16, default_message: &str) -> Du
                         Err(YCQueueError::Timeout) => {
                             thread::yield_now();
                         }
-                        Err(e) => panic!("YCBlockingQueue consumer error: {e:?}"),
+                        Err(e) => panic!("YCMutexQueue consumer error: {e:?}"),
                     }
                 }
 
@@ -726,7 +726,7 @@ fn run_ycblockingqueue(args: &Args, slot_size: u16, default_message: &str) -> Du
 
         if messages.len() != args.msg_count as usize {
             panic!(
-                "YCBlockingQueue: Expected {} validated messages but collected {}",
+                "YCMutexQueue: Expected {} validated messages but collected {}",
                 args.msg_count,
                 messages.len()
             );
@@ -737,7 +737,7 @@ fn run_ycblockingqueue(args: &Args, slot_size: u16, default_message: &str) -> Du
 
         for message in messages {
             if message.len() < INDEX_PREFIX_LEN {
-                panic!("YCBlockingQueue: Validated message shorter than index header");
+                panic!("YCMutexQueue: Validated message shorter than index header");
             }
 
             let mut index_bytes = [0u8; 4];
@@ -745,13 +745,11 @@ fn run_ycblockingqueue(args: &Args, slot_size: u16, default_message: &str) -> Du
             let index = u32::from_le_bytes(index_bytes);
 
             if index >= args.msg_count {
-                panic!("YCBlockingQueue: Received message index {index} out of expected range");
+                panic!("YCMutexQueue: Received message index {index} out of expected range");
             }
 
             if seen[index as usize] {
-                panic!(
-                    "YCBlockingQueue: Duplicate message index {index} detected during validation"
-                );
+                panic!("YCMutexQueue: Duplicate message index {index} detected during validation");
             }
             seen[index as usize] = true;
 
@@ -762,7 +760,7 @@ fn run_ycblockingqueue(args: &Args, slot_size: u16, default_message: &str) -> Du
                 let expected = PATTERN.as_bytes()[(index as usize + offset) % PATTERN.len()];
                 if byte != expected {
                     panic!(
-                        "YCBlockingQueue: Message content mismatch at message {index}, byte {offset}:\nExpected: '{expected}'\nReceived: '{byte}'",
+                        "YCMutexQueue: Message content mismatch at message {index}, byte {offset}:\nExpected: '{expected}'\nReceived: '{byte}'",
                     );
                 }
             }
@@ -770,7 +768,7 @@ fn run_ycblockingqueue(args: &Args, slot_size: u16, default_message: &str) -> Du
 
         if seen.iter().any(|received| !received) {
             panic!(
-                "YCBlockingQueue: Not all expected message indices were observed during validation"
+                "YCMutexQueue: Not all expected message indices were observed during validation"
             );
         }
     }
@@ -1263,7 +1261,7 @@ fn main() {
     #[cfg(feature = "futex")]
     let ycf_dur = run_ycfutexqueue(&args, slot_size, default_message);
     #[cfg(feature = "blocking")]
-    let ycb_dur = run_ycblockingqueue(&args, slot_size, default_message);
+    let ycb_dur = run_ycmutexqueue(&args, slot_size, default_message);
     let flume_dur = run_flume(&args, slot_size, default_message);
     let mv_dur = run_mutex_vecdeque(&args, slot_size, default_message);
 
@@ -1279,7 +1277,7 @@ fn main() {
     );
     #[cfg(feature = "blocking")]
     println!(
-        "  YCBlockingQueue:  {:.3} us",
+        "  YCMutexQueue:  {:.3} us",
         ycb_dur.as_nanos() as f64 / 1_000.0
     );
     println!(
@@ -1310,7 +1308,7 @@ fn main() {
     );
     #[cfg(feature = "blocking")]
     println!(
-        "  YCBlockingQueue:  {}msgs/s",
+        "  YCMutexQueue:  {}msgs/s",
         format_with_si_prefix(ycb_msgs_per_sec)
     );
     println!(

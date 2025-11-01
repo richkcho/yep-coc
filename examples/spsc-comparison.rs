@@ -17,8 +17,8 @@ use yep_coc::{
 
 #[cfg(feature = "blocking")]
 use yep_coc::{
-    YCBlockingQueue,
-    queue_alloc_helpers::{YCBlockingQueueOwnedData, YCBlockingQueueSharedData},
+    YCMutexQueue,
+    queue_alloc_helpers::{YCMutexQueueOwnedData, YCMutexQueueSharedData},
 };
 
 const PATTERN: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -278,17 +278,17 @@ fn run_ycfutexqueue(args: &Args, slot_size: u16, default_message: &str) -> Durat
 }
 
 #[cfg(feature = "blocking")]
-fn run_ycblockingqueue(args: &Args, slot_size: u16, default_message: &str) -> Duration {
-    let owned_data = YCBlockingQueueOwnedData::new(args.queue_depth, slot_size);
-    let consumer_data = YCBlockingQueueSharedData::from_owned_data(&owned_data);
-    let producer_data = YCBlockingQueueSharedData::from_owned_data(&owned_data);
+fn run_ycmutexqueue(args: &Args, slot_size: u16, default_message: &str) -> Duration {
+    let owned_data = YCMutexQueueOwnedData::new(args.queue_depth, slot_size);
+    let consumer_data = YCMutexQueueSharedData::from_owned_data(&owned_data);
+    let producer_data = YCMutexQueueSharedData::from_owned_data(&owned_data);
 
-    let mut consumer_queue = YCBlockingQueue::new(
+    let mut consumer_queue = YCMutexQueue::new(
         YCQueue::new(consumer_data.data.meta, consumer_data.data.data).unwrap(),
         consumer_data.count,
         consumer_data.condvar,
     );
-    let mut producer_queue = YCBlockingQueue::new(
+    let mut producer_queue = YCMutexQueue::new(
         YCQueue::new(producer_data.data.meta, producer_data.data.data).unwrap(),
         producer_data.count,
         producer_data.condvar,
@@ -322,7 +322,7 @@ fn run_ycblockingqueue(args: &Args, slot_size: u16, default_message: &str) -> Du
                                     let got = consume_slot.data[i];
                                     if expected != got {
                                         panic!(
-                                            "YCBlockingQueue mismatch at message {}, byte {}: expected '{}' got '{}'",
+                                            "YCMutexQueue mismatch at message {}, byte {}: expected '{}' got '{}'",
                                             messages_received, i, expected, got
                                         );
                                     }
@@ -331,7 +331,7 @@ fn run_ycblockingqueue(args: &Args, slot_size: u16, default_message: &str) -> Du
 
                             if args.verbose {
                                 let s = str_from_u8(consume_slot.data);
-                                println!("YCBlockingQueue recv: {s}");
+                                println!("YCMutexQueue recv: {s}");
                             }
 
                             consumer_queue.mark_slot_consumed(consume_slot).unwrap();
@@ -340,7 +340,7 @@ fn run_ycblockingqueue(args: &Args, slot_size: u16, default_message: &str) -> Du
                         Err(YCQueueError::Timeout) => {
                             thread::yield_now();
                         }
-                        Err(e) => panic!("YCBlockingQueue consumer error: {e:?}"),
+                        Err(e) => panic!("YCMutexQueue consumer error: {e:?}"),
                     }
                 }
                 *end_time.lock().unwrap() = Some(Instant::now());
@@ -377,10 +377,7 @@ fn run_ycblockingqueue(args: &Args, slot_size: u16, default_message: &str) -> Du
                             }
 
                             if args.verbose {
-                                println!(
-                                    "YCBlockingQueue send: {}",
-                                    str_from_u8(produce_slot.data)
-                                );
+                                println!("YCMutexQueue send: {}", str_from_u8(produce_slot.data));
                             }
 
                             producer_queue.mark_slot_produced(produce_slot).unwrap();
@@ -389,7 +386,7 @@ fn run_ycblockingqueue(args: &Args, slot_size: u16, default_message: &str) -> Du
                         Err(YCQueueError::Timeout) => {
                             thread::yield_now();
                         }
-                        Err(e) => panic!("YCBlockingQueue producer error: {e:?}"),
+                        Err(e) => panic!("YCMutexQueue producer error: {e:?}"),
                     }
                 }
             });
@@ -650,7 +647,7 @@ fn main() {
     #[cfg(feature = "futex")]
     let ycf_dur = run_ycfutexqueue(&args, slot_size, default_message);
     #[cfg(feature = "blocking")]
-    let ycb_dur = run_ycblockingqueue(&args, slot_size, default_message);
+    let ycb_dur = run_ycmutexqueue(&args, slot_size, default_message);
     let flume_dur = run_flume(&args, slot_size, default_message);
     let mv_dur = run_mutex_vecdeque(&args, slot_size, default_message);
 
@@ -666,7 +663,7 @@ fn main() {
     );
     #[cfg(feature = "blocking")]
     println!(
-        "  YCBlockingQueue:  {:.3} us",
+        "  YCMutexQueue:  {:.3} us",
         ycb_dur.as_nanos() as f64 / 1_000.0
     );
     println!(
@@ -697,7 +694,7 @@ fn main() {
     );
     #[cfg(feature = "blocking")]
     println!(
-        "  YCBlockingQueue:  {}msgs/s",
+        "  YCMutexQueue:  {}msgs/s",
         format_with_si_prefix(ycb_msgs_per_sec)
     );
     println!(

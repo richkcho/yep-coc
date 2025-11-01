@@ -15,7 +15,7 @@ pub use futex_queue::YCFutexQueue;
 #[cfg(feature = "blocking")]
 pub mod blocking_queue;
 #[cfg(feature = "blocking")]
-pub use blocking_queue::YCBlockingQueue;
+pub use blocking_queue::YCMutexQueue;
 
 /// dependencies for the circular queue code
 pub mod queue_meta;

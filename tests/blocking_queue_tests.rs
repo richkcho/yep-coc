@@ -6,8 +6,8 @@ mod blocking_queue_tests {
     use std::sync::{Arc, Barrier, Mutex};
     use std::time::{Duration, Instant};
 
-    use yep_coc::queue_alloc_helpers::{YCBlockingQueueOwnedData, YCBlockingQueueSharedData};
-    use yep_coc::{YCBlockingQueue, YCQueueError};
+    use yep_coc::queue_alloc_helpers::{YCMutexQueueOwnedData, YCMutexQueueSharedData};
+    use yep_coc::{YCMutexQueue, YCQueueError};
 
     use test_support::utils::{copy_str_to_slice, str_from_u8};
 
@@ -25,15 +25,15 @@ mod blocking_queue_tests {
         let num_iterations: u16 = 10;
 
         // this is the "original" data - it owned the underlying allocations
-        let owned_data = YCBlockingQueueOwnedData::new(slot_count, slot_size);
+        let owned_data = YCMutexQueueOwnedData::new(slot_count, slot_size);
 
         // we have to make a shared version to use in the other thread
-        let consume_data = YCBlockingQueueSharedData::from_owned_data(&owned_data);
-        let produce_data = YCBlockingQueueSharedData::from_owned_data(&owned_data);
+        let consume_data = YCMutexQueueSharedData::from_owned_data(&owned_data);
+        let produce_data = YCMutexQueueSharedData::from_owned_data(&owned_data);
 
         // set up consumed thread to poll & consume data
-        let mut consume_queue = YCBlockingQueue::from_shared_data(consume_data).unwrap();
-        let mut produce_queue = YCBlockingQueue::from_shared_data(produce_data).unwrap();
+        let mut consume_queue = YCMutexQueue::from_shared_data(consume_data).unwrap();
+        let mut produce_queue = YCMutexQueue::from_shared_data(produce_data).unwrap();
 
         let timeout = std::time::Duration::from_secs(10);
         let deadline = std::time::Instant::now() + timeout;
@@ -113,18 +113,18 @@ mod blocking_queue_tests {
         let timeout = std::time::Duration::from_secs(10);
 
         // this is the "original" data - it owned the underlying allocations
-        let owned_data = YCBlockingQueueOwnedData::new(slot_count, slot_size);
+        let owned_data = YCMutexQueueOwnedData::new(slot_count, slot_size);
 
         // create consumer queues
         let mut consumer_queues = Vec::with_capacity(num_consumers as usize);
         for _ in 0..num_consumers {
-            consumer_queues.push(YCBlockingQueue::from_owned_data(&owned_data).unwrap());
+            consumer_queues.push(YCMutexQueue::from_owned_data(&owned_data).unwrap());
         }
 
         // create producer queues
         let mut producer_queues = Vec::with_capacity(num_producers as usize);
         for _ in 0..num_producers {
-            producer_queues.push(YCBlockingQueue::from_owned_data(&owned_data).unwrap());
+            producer_queues.push(YCMutexQueue::from_owned_data(&owned_data).unwrap());
         }
 
         // atomic counter for sending message id
@@ -260,14 +260,14 @@ mod blocking_queue_tests {
     fn wake_forwarded_when_first_consumer_cannot_progress() {
         let slot_count: u16 = 4;
         let slot_size: u16 = 32;
-        let owned = YCBlockingQueueOwnedData::new(slot_count, slot_size);
+        let owned = YCMutexQueueOwnedData::new(slot_count, slot_size);
 
         let barrier = Arc::new(Barrier::new(3));
         let single_consumed = Arc::new(AtomicBool::new(false));
         let batch_consumed = Arc::new(AtomicBool::new(false));
 
         std::thread::scope(|s| {
-            let mut batch_queue = YCBlockingQueue::from_owned_data(&owned).unwrap();
+            let mut batch_queue = YCMutexQueue::from_owned_data(&owned).unwrap();
             let barrier_clone = Arc::clone(&barrier);
             let batch_flag = Arc::clone(&batch_consumed);
             s.spawn(move || {
@@ -279,7 +279,7 @@ mod blocking_queue_tests {
                 batch_queue.mark_slots_consumed(slots).unwrap();
             });
 
-            let mut single_queue = YCBlockingQueue::from_owned_data(&owned).unwrap();
+            let mut single_queue = YCMutexQueue::from_owned_data(&owned).unwrap();
             let barrier_clone = Arc::clone(&barrier);
             let single_flag = Arc::clone(&single_consumed);
             s.spawn(move || {
@@ -291,7 +291,7 @@ mod blocking_queue_tests {
                 single_queue.mark_slot_consumed(slot).unwrap();
             });
 
-            let mut produce_queue = YCBlockingQueue::from_owned_data(&owned).unwrap();
+            let mut produce_queue = YCMutexQueue::from_owned_data(&owned).unwrap();
             let barrier_clone = Arc::clone(&barrier);
             let single_flag = Arc::clone(&single_consumed);
             let batch_flag = Arc::clone(&batch_consumed);
@@ -338,7 +338,7 @@ mod blocking_queue_tests {
     fn batch_production_wakes_multiple_consumers() {
         let slot_count: u16 = 4;
         let slot_size: u16 = 32;
-        let owned = YCBlockingQueueOwnedData::new(slot_count, slot_size);
+        let owned = YCMutexQueueOwnedData::new(slot_count, slot_size);
 
         let barrier = Arc::new(Barrier::new(3));
         let completion = Arc::new(AtomicUsize::new(0));
@@ -347,7 +347,7 @@ mod blocking_queue_tests {
             for _ in 0..2 {
                 let barrier_clone = Arc::clone(&barrier);
                 let completion_clone = Arc::clone(&completion);
-                let mut consume_queue = YCBlockingQueue::from_owned_data(&owned).unwrap();
+                let mut consume_queue = YCMutexQueue::from_owned_data(&owned).unwrap();
                 s.spawn(move || {
                     barrier_clone.wait();
                     let slot = consume_queue
@@ -358,7 +358,7 @@ mod blocking_queue_tests {
                 });
             }
 
-            let mut produce_queue = YCBlockingQueue::from_owned_data(&owned).unwrap();
+            let mut produce_queue = YCMutexQueue::from_owned_data(&owned).unwrap();
             let barrier_clone = Arc::clone(&barrier);
             s.spawn(move || {
                 let mut slots = produce_queue

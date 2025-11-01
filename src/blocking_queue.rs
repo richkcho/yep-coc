@@ -12,13 +12,13 @@ use crate::{YCQueue, YCQueueConsumeSlot, YCQueueError, YCQueueProduceSlot};
 /// counter when publishing data, and consumers decrement it after consuming
 /// slots. Waiting operations leverage condition variables to block efficiently
 /// until the counter changes or a timeout expires.
-pub struct YCBlockingQueue<'a> {
+pub struct YCMutexQueue<'a> {
     pub queue: YCQueue<'a>,
     pub count: &'a Mutex<i32>,
     pub condvar: &'a Condvar,
 }
 
-impl<'a> YCBlockingQueue<'a> {
+impl<'a> YCMutexQueue<'a> {
     /// Wrap a queue together with a shared produced-counter.
     ///
     /// # Arguments
@@ -36,19 +36,19 @@ impl<'a> YCBlockingQueue<'a> {
     /// ```
     /// # #[cfg(feature = "blocking")] {
     /// use std::sync::{Mutex, Condvar};
-    /// use yep_coc::queue_alloc_helpers::{YCBlockingQueueOwnedData, YCBlockingQueueSharedData};
-    /// use yep_coc::{YCQueue, YCBlockingQueue};
+    /// use yep_coc::queue_alloc_helpers::{YCMutexQueueOwnedData, YCMutexQueueSharedData};
+    /// use yep_coc::{YCQueue, YCMutexQueue};
     ///
-    /// let owned = YCBlockingQueueOwnedData::new(2, 16);
-    /// let shared = YCBlockingQueueSharedData::from_owned_data(&owned);
+    /// let owned = YCMutexQueueOwnedData::new(2, 16);
+    /// let shared = YCMutexQueueSharedData::from_owned_data(&owned);
     /// let queue = YCQueue::new(shared.data.meta, shared.data.data).unwrap();
-    /// let blocking = YCBlockingQueue::new(queue, shared.count, shared.condvar);
+    /// let blocking = YCMutexQueue::new(queue, shared.count, shared.condvar);
     ///
     /// assert_eq!(*blocking.count.lock().unwrap(), 0);
     /// # }
     /// ```
     pub fn new(queue: YCQueue<'a>, count: &'a Mutex<i32>, condvar: &'a Condvar) -> Self {
-        YCBlockingQueue {
+        YCMutexQueue {
             queue,
             count,
             condvar,
@@ -74,11 +74,11 @@ impl<'a> YCBlockingQueue<'a> {
     /// ```
     /// # #[cfg(feature = "blocking")] {
     /// use std::time::Duration;
-    /// use yep_coc::queue_alloc_helpers::YCBlockingQueueOwnedData;
-    /// use yep_coc::YCBlockingQueue;
+    /// use yep_coc::queue_alloc_helpers::YCMutexQueueOwnedData;
+    /// use yep_coc::YCMutexQueue;
     ///
-    /// let owned = YCBlockingQueueOwnedData::new(4, 32);
-    /// let mut queue = YCBlockingQueue::from_owned_data(&owned).unwrap();
+    /// let owned = YCMutexQueueOwnedData::new(4, 32);
+    /// let mut queue = YCMutexQueue::from_owned_data(&owned).unwrap();
     ///
     /// let timeout = Duration::from_millis(1);
     /// let slots = queue
@@ -147,11 +147,11 @@ impl<'a> YCBlockingQueue<'a> {
     /// ```
     /// # #[cfg(feature = "blocking")] {
     /// use std::time::Duration;
-    /// use yep_coc::queue_alloc_helpers::YCBlockingQueueOwnedData;
-    /// use yep_coc::YCBlockingQueue;
+    /// use yep_coc::queue_alloc_helpers::YCMutexQueueOwnedData;
+    /// use yep_coc::YCMutexQueue;
     ///
-    /// let owned = YCBlockingQueueOwnedData::new(2, 32);
-    /// let mut queue = YCBlockingQueue::from_owned_data(&owned).unwrap();
+    /// let owned = YCMutexQueueOwnedData::new(2, 32);
+    /// let mut queue = YCMutexQueue::from_owned_data(&owned).unwrap();
     ///
     /// let timeout = Duration::from_millis(1);
     /// let slot = queue
@@ -190,11 +190,11 @@ impl<'a> YCBlockingQueue<'a> {
     /// ```
     /// # #[cfg(feature = "blocking")] {
     /// use std::time::Duration;
-    /// use yep_coc::queue_alloc_helpers::YCBlockingQueueOwnedData;
-    /// use yep_coc::YCBlockingQueue;
+    /// use yep_coc::queue_alloc_helpers::YCMutexQueueOwnedData;
+    /// use yep_coc::YCMutexQueue;
     ///
-    /// let owned = YCBlockingQueueOwnedData::new(4, 32);
-    /// let mut queue = YCBlockingQueue::from_owned_data(&owned).unwrap();
+    /// let owned = YCMutexQueueOwnedData::new(4, 32);
+    /// let mut queue = YCMutexQueue::from_owned_data(&owned).unwrap();
     /// let timeout = Duration::from_millis(1);
     /// let slots = queue
     ///     .get_produce_slots(2, false, timeout)
@@ -288,11 +288,11 @@ impl<'a> YCBlockingQueue<'a> {
     /// ```
     /// # #[cfg(feature = "blocking")] {
     /// use std::time::Duration;
-    /// use yep_coc::queue_alloc_helpers::YCBlockingQueueOwnedData;
-    /// use yep_coc::YCBlockingQueue;
+    /// use yep_coc::queue_alloc_helpers::YCMutexQueueOwnedData;
+    /// use yep_coc::YCMutexQueue;
     ///
-    /// let owned = YCBlockingQueueOwnedData::new(2, 32);
-    /// let mut queue = YCBlockingQueue::from_owned_data(&owned).unwrap();
+    /// let owned = YCMutexQueueOwnedData::new(2, 32);
+    /// let mut queue = YCMutexQueue::from_owned_data(&owned).unwrap();
     ///
     /// let timeout = Duration::from_millis(1);
     /// let to_publish = queue
@@ -333,11 +333,11 @@ impl<'a> YCBlockingQueue<'a> {
     /// ```
     /// # #[cfg(feature = "blocking")] {
     /// use std::time::Duration;
-    /// use yep_coc::queue_alloc_helpers::YCBlockingQueueOwnedData;
-    /// use yep_coc::YCBlockingQueue;
+    /// use yep_coc::queue_alloc_helpers::YCMutexQueueOwnedData;
+    /// use yep_coc::YCMutexQueue;
     ///
-    /// let owned = YCBlockingQueueOwnedData::new(2, 32);
-    /// let mut queue = YCBlockingQueue::from_owned_data(&owned).unwrap();
+    /// let owned = YCMutexQueueOwnedData::new(2, 32);
+    /// let mut queue = YCMutexQueue::from_owned_data(&owned).unwrap();
     ///
     /// let slot = queue
     ///     .get_produce_slot(Duration::from_millis(1))
@@ -377,11 +377,11 @@ impl<'a> YCBlockingQueue<'a> {
     /// ```
     /// # #[cfg(feature = "blocking")] {
     /// use std::time::Duration;
-    /// use yep_coc::queue_alloc_helpers::YCBlockingQueueOwnedData;
-    /// use yep_coc::YCBlockingQueue;
+    /// use yep_coc::queue_alloc_helpers::YCMutexQueueOwnedData;
+    /// use yep_coc::YCMutexQueue;
     ///
-    /// let owned = YCBlockingQueueOwnedData::new(4, 32);
-    /// let mut queue = YCBlockingQueue::from_owned_data(&owned).unwrap();
+    /// let owned = YCMutexQueueOwnedData::new(4, 32);
+    /// let mut queue = YCMutexQueue::from_owned_data(&owned).unwrap();
     ///
     /// let timeout = Duration::from_millis(1);
     /// let slots = queue
@@ -434,11 +434,11 @@ impl<'a> YCBlockingQueue<'a> {
     /// ```
     /// # #[cfg(feature = "blocking")] {
     /// use std::time::Duration;
-    /// use yep_coc::queue_alloc_helpers::YCBlockingQueueOwnedData;
-    /// use yep_coc::YCBlockingQueue;
+    /// use yep_coc::queue_alloc_helpers::YCMutexQueueOwnedData;
+    /// use yep_coc::YCMutexQueue;
     ///
-    /// let owned = YCBlockingQueueOwnedData::new(2, 32);
-    /// let mut queue = YCBlockingQueue::from_owned_data(&owned).unwrap();
+    /// let owned = YCMutexQueueOwnedData::new(2, 32);
+    /// let mut queue = YCMutexQueue::from_owned_data(&owned).unwrap();
     ///
     /// let timeout = Duration::from_millis(1);
     /// let slots = queue
@@ -474,11 +474,11 @@ impl<'a> YCBlockingQueue<'a> {
     /// ```
     /// # #[cfg(feature = "blocking")] {
     /// use std::time::Duration;
-    /// use yep_coc::queue_alloc_helpers::YCBlockingQueueOwnedData;
-    /// use yep_coc::YCBlockingQueue;
+    /// use yep_coc::queue_alloc_helpers::YCMutexQueueOwnedData;
+    /// use yep_coc::YCMutexQueue;
     ///
-    /// let owned = YCBlockingQueueOwnedData::new(4, 32);
-    /// let mut queue = YCBlockingQueue::from_owned_data(&owned).unwrap();
+    /// let owned = YCMutexQueueOwnedData::new(4, 32);
+    /// let mut queue = YCMutexQueue::from_owned_data(&owned).unwrap();
     ///
     /// let timeout = Duration::from_millis(1);
     /// let slots = queue
@@ -503,14 +503,14 @@ impl<'a> YCBlockingQueue<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::queue_alloc_helpers::YCBlockingQueueOwnedData;
+    use crate::queue_alloc_helpers::YCMutexQueueOwnedData;
 
     const DEFAULT_SMALL_TIMEOUT: Duration = Duration::from_millis(1);
 
     #[test]
     fn single_slot_roundtrip_and_best_effort_paths() {
-        let owned = YCBlockingQueueOwnedData::new(4, 32);
-        let mut blocking_queue = YCBlockingQueue::from_owned_data(&owned).unwrap();
+        let owned = YCMutexQueueOwnedData::new(4, 32);
+        let mut blocking_queue = YCMutexQueue::from_owned_data(&owned).unwrap();
 
         let mut slots = blocking_queue
             .get_produce_slots(1, false, DEFAULT_SMALL_TIMEOUT)
@@ -547,8 +547,8 @@ mod tests {
 
     #[test]
     fn batched_produce_and_staggered_consume() {
-        let owned = YCBlockingQueueOwnedData::new(4, 32);
-        let mut blocking_queue = YCBlockingQueue::from_owned_data(&owned).unwrap();
+        let owned = YCMutexQueueOwnedData::new(4, 32);
+        let mut blocking_queue = YCMutexQueue::from_owned_data(&owned).unwrap();
 
         let mut slots = blocking_queue
             .get_produce_slots(4, false, DEFAULT_SMALL_TIMEOUT)
@@ -584,8 +584,8 @@ mod tests {
     #[test]
     fn timeout_when_queue_empty_or_full() {
         let slot_count: u16 = 2;
-        let owned = YCBlockingQueueOwnedData::new(slot_count, 32);
-        let mut blocking_queue = YCBlockingQueue::from_owned_data(&owned).unwrap();
+        let owned = YCMutexQueueOwnedData::new(slot_count, 32);
+        let mut blocking_queue = YCMutexQueue::from_owned_data(&owned).unwrap();
 
         assert_eq!(
             blocking_queue
