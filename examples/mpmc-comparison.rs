@@ -1277,7 +1277,7 @@ fn main() {
     );
     #[cfg(feature = "mutex")]
     println!(
-        "  YCMutexQueue:  {:.3} us",
+        "  YCMutexQueue:     {:.3} us",
         ycb_dur.as_nanos() as f64 / 1_000.0
     );
     println!(
@@ -1308,7 +1308,7 @@ fn main() {
     );
     #[cfg(feature = "mutex")]
     println!(
-        "  YCMutexQueue:  {}msgs/s",
+        "  YCMutexQueue:     {}msgs/s",
         format_with_si_prefix(ycb_msgs_per_sec)
     );
     println!(
