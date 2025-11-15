@@ -610,16 +610,79 @@ fn run_flume(args: &Args, slot_size: u16, default_message: &str) -> Duration {
     end.duration_since(start)
 }
 
-fn format_with_si_prefix(value: f64) -> String {
-    let prefixes = [(1e12, "T"), (1e9, "G"), (1e6, "M"), (1e3, "K")];
+struct QueueResult {
+    name: &'static str,
+    duration: Duration,
+    throughput: f64,
+}
 
-    for (threshold, prefix) in prefixes {
-        if value >= threshold {
-            return format!("{:.2} {}", value / threshold, prefix);
+impl QueueResult {
+    fn new(name: &'static str, duration: Duration, msg_count: u32) -> Self {
+        let throughput = (msg_count as f64) / duration.as_secs_f64();
+        Self {
+            name,
+            duration,
+            throughput,
+        }
+    }
+}
+
+fn align_decimal_strings(values: &[f64], precision: usize) -> Vec<String> {
+    if values.is_empty() {
+        return Vec::new();
+    }
+
+    let formatted: Vec<String> = values
+        .iter()
+        .map(|value| format!("{:.*}", precision, value))
+        .collect();
+
+    let target_decimal = formatted
+        .iter()
+        .map(|s| s.find('.').unwrap_or(s.len()))
+        .max()
+        .unwrap_or(0);
+
+    formatted
+        .into_iter()
+        .map(|s| {
+            let decimal_pos = s.find('.').unwrap_or(s.len());
+            let padding = target_decimal.saturating_sub(decimal_pos);
+            format!("{}{}", " ".repeat(padding), s)
+        })
+        .collect()
+}
+
+fn choose_common_prefix(values: &[f64]) -> (f64, &'static str) {
+    const PREFIXES: &[(f64, &str)] = &[(1e12, "T"), (1e9, "G"), (1e6, "M"), (1e3, "K"), (1.0, "")];
+
+    if values.is_empty() {
+        return (1.0, "");
+    }
+
+    let mut counts = [0usize; PREFIXES.len()];
+    for &value in values {
+        let mut matched_index = None;
+        for (idx, (threshold, _)) in PREFIXES.iter().enumerate() {
+            if value >= *threshold {
+                matched_index = Some(idx);
+                break;
+            }
+        }
+        let idx = matched_index.unwrap_or(PREFIXES.len() - 1);
+        counts[idx] += 1;
+    }
+
+    let mut best_idx = PREFIXES.len() - 1;
+    let mut best_count = 0usize;
+    for (idx, &count) in counts.iter().enumerate() {
+        if count > best_count || (count == best_count && idx < best_idx) {
+            best_idx = idx;
+            best_count = count;
         }
     }
 
-    format!("{:.2} ", value)
+    PREFIXES[best_idx]
 }
 
 fn main() {
@@ -651,58 +714,67 @@ fn main() {
     let flume_dur = run_flume(&args, slot_size, default_message);
     let mv_dur = run_mutex_vecdeque(&args, slot_size, default_message);
 
-    println!("\nResults (lower is better):");
-    println!(
-        "  YCQueue:          {:.3} us",
-        yc_dur.as_nanos() as f64 / 1_000.0
-    );
+    let mut results = vec![
+        QueueResult::new("YCQueue", yc_dur, args.msg_count),
+        QueueResult::new("Flume (bounded)", flume_dur, args.msg_count),
+        QueueResult::new("Mutex+VecDeque", mv_dur, args.msg_count),
+    ];
     #[cfg(feature = "futex")]
-    println!(
-        "  YCFutexQueue:     {:.3} us",
-        ycf_dur.as_nanos() as f64 / 1_000.0
-    );
+    results.push(QueueResult::new("YCFutexQueue", ycf_dur, args.msg_count));
     #[cfg(feature = "mutex")]
-    println!(
-        "  YCMutexQueue:     {:.3} us",
-        ycb_dur.as_nanos() as f64 / 1_000.0
-    );
-    println!(
-        "  Flume (bounded):  {:.3} us",
-        flume_dur.as_nanos() as f64 / 1_000.0
-    );
-    println!(
-        "  Mutex+VecDeque:   {:.3} us",
-        mv_dur.as_nanos() as f64 / 1_000.0
-    );
+    results.push(QueueResult::new("YCMutexQueue", ycb_dur, args.msg_count));
 
-    let yc_msgs_per_sec = (args.msg_count as f64) / yc_dur.as_secs_f64();
-    #[cfg(feature = "futex")]
-    let ycf_msgs_per_sec = (args.msg_count as f64) / ycf_dur.as_secs_f64();
-    #[cfg(feature = "mutex")]
-    let ycb_msgs_per_sec = (args.msg_count as f64) / ycb_dur.as_secs_f64();
-    let flume_msgs_per_sec = (args.msg_count as f64) / flume_dur.as_secs_f64();
-    let mv_msgs_per_sec = (args.msg_count as f64) / mv_dur.as_secs_f64();
+    let label_width = results
+        .iter()
+        .map(|res| res.name.len() + 1)
+        .max()
+        .unwrap_or(0);
+
+    let mut latency_sorted: Vec<&QueueResult> = results.iter().collect();
+    latency_sorted.sort_by(|a, b| a.duration.cmp(&b.duration));
+    let latency_values: Vec<f64> = latency_sorted
+        .iter()
+        .map(|res| res.duration.as_secs_f64() * 1_000_000.0)
+        .collect();
+    let latency_strings = align_decimal_strings(&latency_values, 3);
+
+    println!("\nResults (lower is better):");
+    for (res, value_str) in latency_sorted.iter().zip(latency_strings.iter()) {
+        println!(
+            "  {:<width$} {} us",
+            format!("{}:", res.name),
+            value_str,
+            width = label_width
+        );
+    }
+
+    let mut throughput_sorted: Vec<&QueueResult> = results.iter().collect();
+    throughput_sorted.sort_by(|a, b| {
+        b.throughput
+            .partial_cmp(&a.throughput)
+            .expect("NaN throughput encountered")
+    });
+    let throughput_values: Vec<f64> = throughput_sorted.iter().map(|res| res.throughput).collect();
+    let (prefix_factor, prefix_label) = choose_common_prefix(&throughput_values);
+    let scaled_throughput: Vec<f64> = throughput_values
+        .iter()
+        .map(|value| value / prefix_factor)
+        .collect();
+    let throughput_strings = align_decimal_strings(&scaled_throughput, 2);
+    let throughput_unit = if prefix_label.is_empty() {
+        "msgs/s".to_string()
+    } else {
+        format!("{prefix_label}msgs/s")
+    };
+
     println!("\nThroughput:");
-    println!(
-        "  YCQueue:          {}msgs/s",
-        format_with_si_prefix(yc_msgs_per_sec)
-    );
-    #[cfg(feature = "futex")]
-    println!(
-        "  YCFutexQueue:     {}msgs/s",
-        format_with_si_prefix(ycf_msgs_per_sec)
-    );
-    #[cfg(feature = "mutex")]
-    println!(
-        "  YCMutexQueue:     {}msgs/s",
-        format_with_si_prefix(ycb_msgs_per_sec)
-    );
-    println!(
-        "  Flume (bounded):  {}msgs/s",
-        format_with_si_prefix(flume_msgs_per_sec)
-    );
-    println!(
-        "  Mutex+VecDeque:   {}msgs/s",
-        format_with_si_prefix(mv_msgs_per_sec)
-    );
+    for (res, value_str) in throughput_sorted.iter().zip(throughput_strings.iter()) {
+        println!(
+            "  {:<width$} {} {}",
+            format!("{}:", res.name),
+            value_str,
+            throughput_unit,
+            width = label_width
+        );
+    }
 }
