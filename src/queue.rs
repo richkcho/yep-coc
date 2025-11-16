@@ -1,4 +1,4 @@
-use std::{cell::Cell, sync::atomic::Ordering};
+use std::sync::atomic::Ordering;
 
 use crate::queue_meta::YCQueueU64Meta;
 
@@ -25,7 +25,7 @@ pub enum YCQueueOwner {
 
 pub struct YCQueue<'a> {
     shared_metadata: YCQueueSharedMeta<'a>,
-    slots: Vec<Cell<Option<&'a mut [u8]>>>,
+    slots: Vec<Option<&'a mut [u8]>>,
     slot_count: u16,
     slot_size: u16,
 }
@@ -61,9 +61,9 @@ impl<'a> YCQueue<'a> {
             return Err(YCQueueError::InvalidArgs);
         }
 
-        let mut slots = Vec::<Cell<Option<&'a mut [u8]>>>::with_capacity(slot_count);
+        let mut slots = Vec::<Option<&'a mut [u8]>>::with_capacity(slot_count);
         for slot in data_region.chunks_exact_mut(slot_size) {
-            slots.push(Cell::new(Some(slot)));
+            slots.push(Some(slot));
         }
 
         if shared_metadata.slot_count.load(Ordering::Acquire) as usize != slot_count {
@@ -397,7 +397,7 @@ impl<'a> YCQueue<'a> {
         for _ in 0..num_slots {
             debug_assert_eq!(self.get_owner(index), YCQueueOwner::Producer);
 
-            let slot_data = self.slots[index as usize].replace(None);
+            let slot_data = self.slots[index as usize].take();
             match slot_data {
                 Some(data) => slots.push(YCQueueProduceSlot { index, data }),
                 None => panic!("We double-loaned out produce index {index:?}"),
@@ -484,7 +484,7 @@ impl<'a> YCQueue<'a> {
 
         // yoink back the slot data
         let produce_idx = queue_slot.index;
-        let old_data = self.slots[produce_idx as usize].replace(Some(queue_slot.data));
+        let old_data = self.slots[produce_idx as usize].replace(queue_slot.data);
 
         debug_assert_eq!(old_data, None);
 
@@ -548,7 +548,7 @@ impl<'a> YCQueue<'a> {
         }
 
         for slot in queue_slots.into_iter() {
-            let old_data = self.slots[slot.index as usize].replace(Some(slot.data));
+            let old_data = self.slots[slot.index as usize].replace(slot.data);
             debug_assert!(old_data.is_none());
         }
 
@@ -645,7 +645,7 @@ impl<'a> YCQueue<'a> {
         for _ in 0..num_slots {
             debug_assert_eq!(self.get_owner(index), YCQueueOwner::Consumer);
 
-            let slot_data = self.slots[index as usize].replace(None);
+            let slot_data = self.slots[index as usize].take();
             match slot_data {
                 Some(data) => slots.push(YCQueueConsumeSlot { index, data }),
                 None => panic!("We double-loaned out consume index {index:?}"),
@@ -727,7 +727,7 @@ impl<'a> YCQueue<'a> {
 
         // yoink back the slot data
         let consume_idx = queue_slot.index;
-        let old_data = self.slots[consume_idx as usize].replace(Some(queue_slot.data));
+        let old_data = self.slots[consume_idx as usize].replace(queue_slot.data);
 
         debug_assert_eq!(old_data, None);
 
@@ -793,7 +793,7 @@ impl<'a> YCQueue<'a> {
         }
 
         for slot in queue_slots.into_iter() {
-            let old_data = self.slots[slot.index as usize].replace(Some(slot.data));
+            let old_data = self.slots[slot.index as usize].replace(slot.data);
             debug_assert!(old_data.is_none());
         }
 
