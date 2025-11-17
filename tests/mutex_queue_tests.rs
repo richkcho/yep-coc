@@ -35,9 +35,6 @@ mod blocking_queue_tests {
         let mut consume_queue = YCMutexQueue::from_shared_data(consume_data).unwrap();
         let mut produce_queue = YCMutexQueue::from_shared_data(produce_data).unwrap();
 
-        let timeout = std::time::Duration::from_secs(10);
-        let deadline = std::time::Instant::now() + timeout;
-
         std::thread::scope(|s| {
             // consumer thread
             s.spawn(move || {
@@ -65,10 +62,6 @@ mod blocking_queue_tests {
                             panic!("unexpected error when consuming: {e:?}");
                         }
                     }
-
-                    if std::time::Instant::now() > deadline {
-                        panic!("test timed out after {timeout:?}");
-                    }
                 }
             });
 
@@ -94,10 +87,6 @@ mod blocking_queue_tests {
                             panic!("unexpected error when producing: {e:?}");
                         }
                     }
-
-                    if std::time::Instant::now() > deadline {
-                        panic!("test timed out after {timeout:?}");
-                    }
                 }
             });
         });
@@ -110,7 +99,6 @@ mod blocking_queue_tests {
         let num_iterations: u16 = 100;
         let num_producers: u16 = 4;
         let num_consumers: u16 = 4;
-        let timeout = std::time::Duration::from_secs(10);
 
         // this is the "original" data - it owned the underlying allocations
         let owned_data = YCMutexQueueOwnedData::new(slot_count, slot_size);
@@ -135,7 +123,6 @@ mod blocking_queue_tests {
         let received_ids = Arc::new(Mutex::new(HashSet::<u32>::new()));
         let sent_ids = Arc::new(Mutex::new(HashSet::<u32>::new()));
 
-        let deadline = std::time::Instant::now() + timeout;
         std::thread::scope(|s| {
             // start consumers
             for i in 0..num_consumers {
@@ -179,10 +166,6 @@ mod blocking_queue_tests {
                                 panic!("unexpected error when consuming: {e:?}");
                                 }
                             }
-
-                            if std::time::Instant::now() > deadline {
-                                panic!("test timed out after {timeout:?}");
-                            }
                         }
                     })
                     .unwrap();
@@ -219,10 +202,6 @@ mod blocking_queue_tests {
                                 Err(e) => {
                                     panic!("unexpected error when producing: {e:?}");
                                 }
-                            }
-
-                            if std::time::Instant::now() > deadline {
-                                panic!("test timed out after {timeout:?}");
                             }
                         }
                     })

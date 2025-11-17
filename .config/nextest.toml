@@ -1,0 +1,14 @@
+# Nextest configuration for yep-coc
+# https://nexte.st/book/configuration.html
+
+[profile.default]
+# Global default timeouts for tests
+# Slow timeout: test is marked as slow after 1 second  
+# Terminate timeout: test is terminated after 5 seconds (5 = 1s × 5 periods)
+slow-timeout = { period = "1s", terminate-after = 5 }
+
+[profile.ci]
+# CI profile with doubled timeouts to account for slower CI machines
+# Slow timeout: test is marked as slow after 2 seconds
+# Terminate timeout: test is terminated after 10 seconds (10 = 2s × 5 periods)
+slow-timeout = { period = "2s", terminate-after = 5 }
