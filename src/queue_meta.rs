@@ -6,83 +6,49 @@ use std::sync::atomic::{AtomicU16, AtomicU64};
 pub struct YCQueueSharedMeta<'a> {
     pub(crate) slot_count: &'a AtomicU16,
     pub(crate) slot_size: &'a AtomicU16,
-    pub(crate) u64_meta: &'a AtomicU64,
+    pub(crate) producer_cursor: &'a AtomicU64,
+    pub(crate) consumer_cursor: &'a AtomicU64,
     /// bitmap representing who owns which slot in the queue. 0 -> producer, 1 -> consumer.
     pub(crate) ownership: &'a [AtomicU64],
 }
 
-/// Producer and consumer counters live here. This is all in one atomic u64 to allow for atomic updates of all
-/// fields at once. This has the drawback that the fields occupy the same cache line. Howeer, for a produce +
-/// consume operation, both producer and consumer will need to synchronize on both producer and consumer counters,
-/// so splitting it into separate cache lines may not be beneficial. It's likely hw dependent, but I don't know
-/// without data first.
-/// TODO: revisit this decision once I have the benchmarks and data.
-#[derive(Copy, Clone, Debug)]
-pub(crate) struct YCQueueU64Meta {
-    /// where to currently produce into
-    pub(crate) produce_idx: u16,
-    /// where to consume from
-    pub(crate) consume_idx: u16,
-    // how many in-flight messages there are
-    pub(crate) in_flight: u16,
+pub(crate) type YCQueueCursor = u64;
+
+#[inline]
+pub(crate) fn cursor_advance(cursor: YCQueueCursor, delta: u16) -> YCQueueCursor {
+    cursor + u64::from(delta)
 }
 
-impl YCQueueU64Meta {
-    pub(crate) fn from_u64(value: u64) -> YCQueueU64Meta {
-        let produce_idx = value as u16;
-        let consume_idx = (value >> u16::BITS) as u16;
-        let in_flight = (value >> (2 * u16::BITS)) as u16;
-
-        YCQueueU64Meta {
-            produce_idx,
-            consume_idx,
-            in_flight,
-        }
-    }
-
-    pub(crate) fn to_u64(self) -> u64 {
-        let mut value: u64 = self.consume_idx as u64;
-        value <<= u16::BITS;
-        value |= self.in_flight as u64;
-        value <<= u16::BITS;
-        value |= self.consume_idx as u64;
-        value <<= u16::BITS;
-        value |= self.produce_idx as u64;
-
-        value
-    }
+#[inline]
+pub(crate) fn cursor_index(cursor: YCQueueCursor, slot_size_exp: u16) -> u16 {
+    (cursor as u16) & ((1 << slot_size_exp) - 1)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::YCQueueU64Meta;
+    use super::{YCQueueCursor, cursor_advance, cursor_index};
 
     #[test]
-    fn test_u64_meta() {
-        let mut meta: YCQueueU64Meta = YCQueueU64Meta::from_u64(0);
+    fn cursor_round_trip() {
+        let meta: YCQueueCursor = 7;
+        let encoded = meta;
+        let decoded = encoded;
 
-        assert_eq!(meta.produce_idx, 0);
-        assert_eq!(meta.consume_idx, 0);
-        assert_eq!(meta.in_flight, 0);
-        assert_eq!(meta.to_u64(), 0);
+        assert_eq!(decoded, meta);
+    }
 
-        let test_produce_idx: u16 = 1;
-        let test_consume_idx: u16 = 2;
-        let test_in_flight: u16 = 3;
+    #[test]
+    fn cursor_advances() {
+        let meta: YCQueueCursor = 15;
+        let advanced = cursor_advance(meta, 5);
 
-        meta.produce_idx = test_produce_idx;
-        meta.consume_idx = test_consume_idx;
-        meta.in_flight = test_in_flight;
+        assert_eq!(advanced, 20);
+        assert_eq!(meta, 15);
+    }
 
-        // create new meta as copy from u64
-        let new_meta = YCQueueU64Meta::from_u64(meta.to_u64());
-
-        // validate u64 rep is same
-        assert_eq!(meta.to_u64(), new_meta.to_u64());
-
-        // validate fields are also the same
-        assert_eq!(meta.produce_idx, new_meta.produce_idx);
-        assert_eq!(meta.consume_idx, new_meta.consume_idx);
-        assert_eq!(meta.in_flight, new_meta.in_flight);
+    #[test]
+    fn cursor_indices_masked() {
+        let meta: YCQueueCursor = 0b1011;
+        assert_eq!(cursor_index(meta, 3), 0b011);
     }
 }
