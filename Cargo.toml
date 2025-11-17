@@ -27,6 +27,7 @@ core_affinity = "0.8"
 [dependencies]
 cfg-if = "1.0"
 wait_on_address = { version = "0.1", optional = true }
+yep-cache-line-size = "0.9"
 
 [[bench]]
 name = "spsc-throughput"
