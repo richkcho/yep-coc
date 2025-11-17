@@ -1,0 +1,16 @@
+# Nextest configuration for yep-coc
+# https://nexte.st/book/configuration.html
+
+[profile.default]
+# Global default timeouts for tests
+# Soft timeout: test is marked as slow after 1 second
+# Hard timeout: test is terminated after 5 seconds
+slow-timeout = { period = "1s" }
+test-timeout = "5s"
+
+[profile.ci]
+# CI profile with doubled timeouts to account for slower CI machines
+# Soft timeout: test is marked as slow after 2 seconds
+# Hard timeout: test is terminated after 10 seconds
+slow-timeout = { period = "2s" }
+test-timeout = "10s"

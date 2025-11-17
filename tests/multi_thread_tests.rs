@@ -181,7 +181,6 @@ mod multi_thread_tests {
         let num_iterations: u16 = 100;
         let num_producers: u16 = 4;
         let num_consumers: u16 = 4;
-        let timeout = std::time::Duration::from_secs(10);
 
         // this is the "original" data - it owned the underlying allocations
         let owned_data = YCQueueOwnedData::new(slot_count, slot_size);
@@ -208,7 +207,6 @@ mod multi_thread_tests {
         let received_ids = Arc::new(Mutex::new(HashSet::<u32>::new()));
         let sent_ids = Arc::new(Mutex::new(HashSet::<u32>::new()));
 
-        let deadline = std::time::Instant::now() + timeout;
         std::thread::scope(|s| {
             // start consumers
             for i in 0..num_consumers {
@@ -252,10 +250,6 @@ mod multi_thread_tests {
                                 panic!("unexpected error when consuming: {e:?}");
                                 }
                             }
-
-                            if std::time::Instant::now() > deadline {
-                                panic!("test timed out after {timeout:?}");
-                            }
                         }
                     })
                     .unwrap();
@@ -290,10 +284,6 @@ mod multi_thread_tests {
                                 Err(e) => {
                                     panic!("unexpected error when producing: {e:?}");
                                 }
-                            }
-
-                            if std::time::Instant::now() > deadline {
-                                panic!("test timed out after {timeout:?}");
                             }
                         }
                     })
@@ -335,7 +325,6 @@ mod multi_thread_tests {
         let num_producers: u16 = 4;
         let num_consumers: u16 = 4;
         let batch_size: u16 = 5;
-        let timeout = std::time::Duration::from_secs(10);
 
         let owned_data = YCQueueOwnedData::new(slot_count, slot_size);
 
@@ -356,8 +345,6 @@ mod multi_thread_tests {
 
         let received_ids = Arc::new(Mutex::new(HashSet::<u32>::new()));
         let sent_ids = Arc::new(Mutex::new(HashSet::<u32>::new()));
-
-        let deadline = std::time::Instant::now() + timeout;
 
         std::thread::scope(|s| {
             for i in 0..num_consumers {
@@ -430,10 +417,6 @@ mod multi_thread_tests {
                                     panic!("unexpected error consuming batched slots: {e:?}")
                                 }
                             }
-
-                            if std::time::Instant::now() > deadline {
-                                panic!("batched consumer timed out after {timeout:?}");
-                            }
                         }
                     })
                     .unwrap();
@@ -479,10 +462,6 @@ mod multi_thread_tests {
                                         panic!("unexpected error producing batched slots: {e:?}");
                                     }
                                 }
-
-                                if std::time::Instant::now() > deadline {
-                                    panic!("batched producer timed out after {timeout:?}");
-                                }
                             }
                         }
                     })
@@ -512,7 +491,6 @@ mod multi_thread_tests {
         let slot_size: u16 = 16;
         let large_batch: u16 = 67;
         let reservations_per_thread: usize = 10;
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
 
         let owned_data = YCQueueOwnedData::new(slot_count, slot_size);
 
@@ -558,10 +536,6 @@ mod multi_thread_tests {
                             }
                             Err(e) => panic!("unexpected error producing batch: {e:?}"),
                         }
-
-                        if std::time::Instant::now() > deadline {
-                            panic!("large producer timed out");
-                        }
                     }
                 })
                 .unwrap();
@@ -583,10 +557,6 @@ mod multi_thread_tests {
                                 std::thread::yield_now();
                             }
                             Err(e) => panic!("unexpected error producing single slot: {e:?}"),
-                        }
-
-                        if std::time::Instant::now() > deadline {
-                            panic!("small producer timed out");
                         }
                     }
                 })
@@ -637,10 +607,6 @@ mod multi_thread_tests {
                             }
                             Err(e) => panic!("unexpected error consuming batch: {e:?}"),
                         }
-
-                        if std::time::Instant::now() > deadline {
-                            panic!("large consumer timed out");
-                        }
                     }
                 })
                 .unwrap();
@@ -658,9 +624,6 @@ mod multi_thread_tests {
                         }
 
                         if large_batches_clone.load(Ordering::Acquire) == 0 {
-                            if std::time::Instant::now() > deadline {
-                                panic!("small consumer timed out before first batch");
-                            }
                             std::thread::yield_now();
                             continue;
                         }
@@ -677,10 +640,6 @@ mod multi_thread_tests {
                                 std::thread::yield_now();
                             }
                             Err(e) => panic!("unexpected error consuming single slot: {e:?}"),
-                        }
-
-                        if std::time::Instant::now() > deadline {
-                            panic!("small consumer timed out");
                         }
                     }
                 })
