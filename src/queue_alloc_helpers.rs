@@ -14,12 +14,54 @@ cfg_if::cfg_if! {
 
 use crate::{YCQueue, YCQueueError, YCQueueSharedMeta};
 use std::sync::atomic::{AtomicU16, AtomicU64};
+use yep_cache_line_size::{CacheLevel, CacheType, get_cache_line_size};
+
+const DEFAULT_CACHE_LINE_SIZE: usize = 64;
+
+fn cache_line_size() -> usize {
+    get_cache_line_size(CacheLevel::L1, CacheType::Data)
+        .ok()
+        .filter(|size| size.is_power_of_two())
+        .unwrap_or(DEFAULT_CACHE_LINE_SIZE)
+}
+
+/// Cache-line padded atomic wrapper to keep heavily contended values isolated for owned metadata.
+#[derive(Debug)]
+#[repr(align(64))]
+pub struct CachePaddedAtomicU64(AtomicU64);
+
+impl CachePaddedAtomicU64 {
+    pub(crate) const fn new(value: u64) -> Self {
+        CachePaddedAtomicU64(AtomicU64::new(value))
+    }
+}
+
+impl std::ops::Deref for CachePaddedAtomicU64 {
+    type Target = AtomicU64;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for CachePaddedAtomicU64 {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+fn align_to(ptr: *mut u8, alignment: usize) -> *mut u8 {
+    let addr = ptr as usize;
+    let aligned = (addr + alignment - 1) & !(alignment - 1);
+    aligned as *mut u8
+}
 
 #[derive(Debug)]
 pub struct YCQueueOwnedMeta {
     pub slot_count: AtomicU16,
     pub slot_size: AtomicU16,
-    pub u64_meta: AtomicU64,
+    pub producer_meta: CachePaddedAtomicU64,
+    pub consumer_meta: CachePaddedAtomicU64,
     pub ownership: Vec<AtomicU64>,
 }
 
@@ -27,7 +69,8 @@ impl YCQueueOwnedMeta {
     pub fn new(slot_count_u16: u16, slot_size_u16: u16) -> YCQueueOwnedMeta {
         let slot_count = AtomicU16::new(slot_count_u16);
         let slot_size = AtomicU16::new(slot_size_u16);
-        let u64_meta = AtomicU64::new(0);
+        let producer_meta = CachePaddedAtomicU64::new(0);
+        let consumer_meta = CachePaddedAtomicU64::new(0);
         let mut ownership =
             Vec::<AtomicU64>::with_capacity((slot_count_u16 as usize).div_ceil(u64::BITS as usize));
 
@@ -38,7 +81,8 @@ impl YCQueueOwnedMeta {
         YCQueueOwnedMeta {
             slot_count,
             slot_size,
-            u64_meta,
+            producer_meta,
+            consumer_meta,
             ownership,
         }
     }
@@ -49,7 +93,8 @@ impl<'a> YCQueueSharedMeta<'a> {
         YCQueueSharedMeta {
             slot_count: &meta_ref.slot_count,
             slot_size: &meta_ref.slot_size,
-            u64_meta: &meta_ref.u64_meta,
+            producer_cursor: &meta_ref.producer_meta,
+            consumer_cursor: &meta_ref.consumer_meta,
             ownership: &meta_ref.ownership,
         }
     }
@@ -61,15 +106,23 @@ impl<'a> YCQueueSharedMeta<'a> {
 
         let slot_count_ptr = ptr as *mut AtomicU16;
         let slot_size_ptr = unsafe { slot_count_ptr.add(1) };
-        let u64_meta_ptr = unsafe { slot_size_ptr.add(1) as *mut AtomicU64 };
+        let mut byte_cursor = unsafe { slot_size_ptr.add(1) as *mut u8 };
+
+        let line_size = cache_line_size();
+        let producer_meta_ptr = align_to(byte_cursor, line_size) as *mut CachePaddedAtomicU64;
+        let consumer_meta_ptr = unsafe { producer_meta_ptr.add(1) };
+        byte_cursor = unsafe { (consumer_meta_ptr.add(1)) as *mut u8 };
+
+        let ownership_ptr =
+            align_to(byte_cursor, std::mem::align_of::<AtomicU64>()) as *mut AtomicU64;
 
         let slot_count = unsafe { &*slot_count_ptr };
         let slot_size = unsafe { &*slot_size_ptr };
-        let u64_meta = unsafe { &*u64_meta_ptr };
+        let producer_meta: &AtomicU64 = unsafe { &*producer_meta_ptr };
+        let consumer_meta: &AtomicU64 = unsafe { &*consumer_meta_ptr };
 
         let slot_count_u16 = slot_count.load(std::sync::atomic::Ordering::Acquire);
         let ownership_count = (slot_count_u16 as usize).div_ceil(u64::BITS as usize);
-        let ownership_ptr = unsafe { u64_meta_ptr.add(1) };
 
         let ownership_slice =
             unsafe { std::slice::from_raw_parts_mut(ownership_ptr, ownership_count) };
@@ -77,7 +130,8 @@ impl<'a> YCQueueSharedMeta<'a> {
         Ok(YCQueueSharedMeta {
             slot_count,
             slot_size,
-            u64_meta,
+            producer_cursor: producer_meta,
+            consumer_cursor: consumer_meta,
             ownership: ownership_slice,
         })
     }
@@ -291,8 +345,12 @@ mod queue_alloc_helpers_tests {
         let shared_meta: YCQueueSharedMeta<'_> = YCQueueSharedMeta::new(&owned_meta);
 
         assert_eq!(
-            owned_meta.u64_meta.load(Ordering::Acquire),
-            shared_meta.u64_meta.load(Ordering::Acquire)
+            owned_meta.producer_meta.load(Ordering::Acquire),
+            shared_meta.producer_cursor.load(Ordering::Acquire)
+        );
+        assert_eq!(
+            owned_meta.consumer_meta.load(Ordering::Acquire),
+            shared_meta.consumer_cursor.load(Ordering::Acquire)
         );
 
         // validate initial memory
@@ -306,8 +364,18 @@ mod queue_alloc_helpers_tests {
 
         // write to owned and see it reflect in shared
         let new_value: u64 = 12345;
-        owned_meta.u64_meta.store(new_value, Ordering::Release);
-        assert_eq!(shared_meta.u64_meta.load(Ordering::Acquire), new_value);
+        owned_meta.producer_meta.store(new_value, Ordering::Release);
+        assert_eq!(
+            shared_meta.producer_cursor.load(Ordering::Acquire),
+            new_value
+        );
+        owned_meta
+            .consumer_meta
+            .store(new_value + 1, Ordering::Release);
+        assert_eq!(
+            shared_meta.consumer_cursor.load(Ordering::Acquire),
+            new_value + 1
+        );
         for i in 0..num_atomics {
             owned_meta.ownership[i].store(i as u64, Ordering::Release);
         }
@@ -316,9 +384,21 @@ mod queue_alloc_helpers_tests {
         }
 
         // write to shared and see it reflect in owned
-        let new_new_value = 54321;
-        shared_meta.u64_meta.store(new_new_value, Ordering::Release);
-        assert_eq!(owned_meta.u64_meta.load(Ordering::Acquire), new_new_value);
+        let new_new_value: u64 = 54321;
+        shared_meta
+            .producer_cursor
+            .store(new_new_value, Ordering::Release);
+        assert_eq!(
+            owned_meta.producer_meta.load(Ordering::Acquire),
+            new_new_value
+        );
+        shared_meta
+            .consumer_cursor
+            .store(new_new_value + 1, Ordering::Release);
+        assert_eq!(
+            owned_meta.consumer_meta.load(Ordering::Acquire),
+            new_new_value + 1
+        );
         for i in 0..num_atomics {
             shared_meta.ownership[i].store(new_new_value + (i as u64), Ordering::Release);
         }
