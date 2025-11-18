@@ -1,5 +1,8 @@
 use clap::Parser;
-use std::thread;
+use std::{
+    thread,
+    time::{Duration, Instant},
+};
 use test_support::utils::{align_to_cache_line, copy_str_to_slice, str_from_u8};
 use yep_coc::{
     YCQueue, YCQueueError, queue_alloc_helpers::YCQueueOwnedData,
@@ -31,6 +34,10 @@ struct Args {
     /// Enable verbose logging
     #[arg(short = 'v', long, default_value_t = false)]
     verbose: bool,
+
+    /// Timeout in seconds for sender/receiver loops
+    #[arg(short = 't', long, default_value = "10")]
+    timeout_secs: u64,
 }
 
 fn main() {
@@ -67,11 +74,14 @@ fn main() {
     let mut consumer_queue = YCQueue::new(consumer_data.meta, consumer_data.data).unwrap();
     let mut producer_queue = YCQueue::new(producer_data.meta, producer_data.data).unwrap();
 
+    let timeout = Duration::from_secs(args.timeout_secs);
+    let test_start = Instant::now();
+
     // time when producer thread starts
-    let mut start_time = std::time::Instant::now();
+    let mut start_time = test_start;
 
     // time when consumer thread finishes
-    let mut end_time = std::time::Instant::now();
+    let mut end_time = test_start;
 
     // Use thread scope to ensure all threads complete before program exit
     thread::scope(|s| {
@@ -79,6 +89,12 @@ fn main() {
         s.spawn(|| {
             let mut messages_received = 0;
             while messages_received < args.msg_count {
+                if test_start.elapsed() >= timeout {
+                    panic!(
+                        "Consumer timed out after {:?} while waiting for message {}",
+                        timeout, messages_received
+                    );
+                }
                 match consumer_queue.get_consume_slot() {
                     Ok(consume_slot) => {
                         // Convert received data to string and check contents
@@ -109,15 +125,21 @@ fn main() {
                 }
             }
 
-            end_time = std::time::Instant::now();
+            end_time = Instant::now();
             println!("Consumer finished after receiving {messages_received} messages");
         });
 
         // Producer thread
         s.spawn(|| {
-            start_time = std::time::Instant::now();
+            start_time = Instant::now();
             let mut messages_sent = 0;
             while messages_sent < args.msg_count {
+                if test_start.elapsed() >= timeout {
+                    panic!(
+                        "Producer timed out after {:?} while waiting to send message {}",
+                        timeout, messages_sent
+                    );
+                }
                 if producer_queue.in_flight_count() >= args.in_flight_count {
                     thread::yield_now(); // Too many in-flight messages, yield CPU
                     continue;
