@@ -94,7 +94,7 @@ pub struct YCQueueOwnedData {
 impl YCQueueOwnedData {
     pub fn new(slot_count_u16: u16, slot_size_u16: u16) -> YCQueueOwnedData {
         let meta = YCQueueOwnedMeta::new(slot_count_u16, slot_size_u16);
-        let mut data = vec![0_u8; (slot_count_u16 * slot_size_u16) as usize];
+        let mut data = vec![0_u8; slot_count_u16 as usize * slot_size_u16 as usize];
         let raw_ptr = data.as_mut_ptr();
 
         YCQueueOwnedData {

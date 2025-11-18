@@ -6,7 +6,9 @@
 //! # Features
 //! - Thread pinning: Producer and consumer threads are pinned to different CPU cores using
 //!   core_affinity to avoid SMT siblings and reduce cache contention.
-//! - NUMA-aware: Queue allocation happens after thread pinning for proper first-touch allocation.
+//! - NUMA-aware: Queue views are created after pinning so each thread first-touches memory on the
+//!   correct NUMA node while sharing a single `YCQueueOwnedData` allocation from
+//!   `queue_alloc_helpers`.
 //! - Synchronized start: Uses a barrier to ensure both threads start simultaneously, measuring
 //!   only steady-state performance without startup costs.
 //! - Wall-clock timing: Uses iter_custom to measure total elapsed time across both threads.
@@ -15,13 +17,14 @@
 //! - Batch operations: Supports both single-slot and batched produce/consume operations.
 //!
 //! # Parameters Swept
-//! - Capacities: 256, 512, 2048 slots
-//! - Payload sizes: 8, 64, 128 bytes
+//! - Capacities: 256, 512, 1024 slots
+//! - Payload sizes: 8, 64, 246 bytes
 //! - Batch sizes: 1, 8, 32 (operations per API call)
+//! - Queue rounds: 10 passes through the queue per measurement iteration
 //!
 //! # Configuration
-//! - Measurement time: 3 seconds per benchmark
-//! - Sample size: 50 measurements
+//! - Measurement time: 5 seconds per benchmark
+//! - Sample size: 100 measurements
 //! - Throughput reported in messages/second
 
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
@@ -33,8 +36,8 @@ use yep_coc::{
     queue_alloc_helpers::{YCQueueOwnedData, YCQueueSharedData},
 };
 
-/// Wrapper to make YCQueueOwnedData Send+Sync for benchmarking
-/// This is safe because the queue's internal atomics handle synchronization
+/// Wrapper to make queue_alloc_helpers::YCQueueOwnedData Send+Sync for benchmarking.
+/// This is safe because the queue's internal atomics handle synchronization.
 struct SendSyncOwnedData(YCQueueOwnedData);
 unsafe impl Send for SendSyncOwnedData {}
 unsafe impl Sync for SendSyncOwnedData {}
@@ -44,13 +47,14 @@ struct BenchParams {
     capacity: u16,
     payload_size: u16,
     batch_size: u16,
+    rounds: u16,
 }
 
 impl BenchParams {
     fn id(&self) -> String {
         format!(
-            "cap{}_payload{}_batch{}",
-            self.capacity, self.payload_size, self.batch_size
+            "cap{}_payload{}_batch{}_rounds{}",
+            self.capacity, self.payload_size, self.batch_size, self.rounds
         )
     }
 }
@@ -78,12 +82,12 @@ fn bench_spsc_throughput(c: &mut Criterion, params: BenchParams) {
     let mut group = c.benchmark_group("spsc_throughput");
 
     // Configure Criterion
-    group.measurement_time(Duration::from_secs(3));
-    group.sample_size(50);
+    group.measurement_time(Duration::from_secs(5));
+    group.sample_size(100);
 
     // Set throughput metric in messages (elements)
-    let total_messages = params.capacity as u64;
-    group.throughput(Throughput::Elements(total_messages));
+    let messages_per_iter = params.capacity as u64 * params.rounds as u64;
+    group.throughput(Throughput::Elements(messages_per_iter));
 
     let (producer_core, consumer_core) = select_cores();
 
@@ -100,10 +104,9 @@ fn bench_spsc_throughput(c: &mut Criterion, params: BenchParams) {
                     let barrier_producer = Arc::clone(&barrier);
                     let barrier_consumer = Arc::clone(&barrier);
 
-                    // Calculate total number of messages to send
-                    let messages_per_iter = params.capacity as u64;
-
-                    // Allocate queue data BEFORE spawning threads - wrap in Arc for sharing
+                    // Allocate queue data BEFORE spawning threads - wrap in Arc for sharing.
+                    // The queue storage comes from queue_alloc_helpers so both threads get shared
+                    // views while the owned allocation stays in one place.
                     let owned_data = Arc::new(SendSyncOwnedData(YCQueueOwnedData::new(
                         params.capacity,
                         params.payload_size,
@@ -207,15 +210,8 @@ fn bench_spsc_throughput(c: &mut Criterion, params: BenchParams) {
                             drop(start);
 
                             let mut messages_sent = 0u64;
-                            let max_in_flight = params.capacity / 2;
 
                             while messages_sent < messages_per_iter {
-                                // Throttle if too many in-flight
-                                if producer_queue.in_flight_count() >= max_in_flight {
-                                    thread::yield_now();
-                                    continue;
-                                }
-
                                 // Try to produce up to batch_size items
                                 let remaining = messages_per_iter - messages_sent;
                                 let request =
@@ -291,9 +287,10 @@ fn bench_spsc_throughput(c: &mut Criterion, params: BenchParams) {
 fn spsc_throughput_benchmarks(c: &mut Criterion) {
     // Define parameter sweep
     // Note: capacity * payload_size must be < 65536 to avoid u16 overflow in the queue implementation
-    let capacities = vec![256, 512, 2048];
-    let payload_sizes = vec![8, 64, 128];
+    let capacities = vec![256, 512, 1024];
+    let payload_sizes = vec![8, 64, 246];
     let batch_sizes = vec![1, 8, 32];
+    let rounds = 10u16;
 
     for capacity in &capacities {
         for payload_size in &payload_sizes {
@@ -308,6 +305,7 @@ fn spsc_throughput_benchmarks(c: &mut Criterion) {
                     capacity: *capacity,
                     payload_size: *payload_size,
                     batch_size: *batch_size,
+                    rounds,
                 };
 
                 bench_spsc_throughput(c, params);
