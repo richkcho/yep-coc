@@ -17,7 +17,7 @@ mod multi_thread_tests {
     fn simple_produce_consume_test() {
         let slot_count: u16 = 64;
         let slot_size: u16 = 64;
-        let num_iterations: u16 = 10;
+        let num_iterations: u16 = 1000;
 
         // this is the "original" data - it owned the underlying allocations
         let owned_data = YCQueueOwnedData::new(slot_count, slot_size);
@@ -87,7 +87,7 @@ mod multi_thread_tests {
     fn batched_simple_produce_consume_test() {
         let slot_count: u16 = 64;
         let slot_size: u16 = 64;
-        let num_iterations: u16 = 10;
+        let num_iterations: u16 = 1000;
         let batch_size: u16 = 5;
 
         let owned_data = YCQueueOwnedData::new(slot_count, slot_size);
@@ -178,7 +178,7 @@ mod multi_thread_tests {
     fn multi_produce_consume_test() {
         let slot_count: u16 = 64;
         let slot_size: u16 = 64;
-        let num_iterations: u16 = 100;
+        let num_iterations: u16 = 1000;
         let num_producers: u16 = 4;
         let num_consumers: u16 = 4;
 
@@ -321,7 +321,7 @@ mod multi_thread_tests {
     fn batched_multi_produce_consume_test() {
         let slot_count: u16 = 64;
         let slot_size: u16 = 64;
-        let num_iterations: u16 = 50;
+        let num_iterations: u16 = 1000;
         let num_producers: u16 = 4;
         let num_consumers: u16 = 4;
         let batch_size: u16 = 5;
