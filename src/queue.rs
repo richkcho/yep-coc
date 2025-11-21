@@ -30,6 +30,8 @@ pub struct YCQueue<'a> {
     slot_size: u16,
     // slot count is a power of two, so we can store its exponent for fast calculations
     slot_count_exp: u16,
+    cached_consumer_cursor: YCQueueCursor,
+    cached_producer_cursor: YCQueueCursor,
 }
 
 impl<'a> YCQueue<'a> {
@@ -83,6 +85,8 @@ impl<'a> YCQueue<'a> {
             slot_count: slot_count as u16,
             slot_size: slot_size as u16,
             slot_count_exp,
+            cached_consumer_cursor: shared_metadata.consumer_cursor.load(Ordering::Acquire),
+            cached_producer_cursor: shared_metadata.producer_cursor.load(Ordering::Acquire),
         })
     }
 
@@ -260,16 +264,20 @@ impl<'a> YCQueue<'a> {
         Ok(())
     }
 
+    fn refresh_consumer_cursor(&mut self) -> YCQueueCursor {
+        let cursor = self.shared_metadata.consumer_cursor.load(Ordering::Acquire);
+        self.cached_consumer_cursor = cursor;
+        cursor
+    }
+
+    fn refresh_producer_cursor(&mut self) -> YCQueueCursor {
+        let cursor = self.shared_metadata.producer_cursor.load(Ordering::Acquire);
+        self.cached_producer_cursor = cursor;
+        cursor
+    }
+
     fn cursor_index(&self, cursor: YCQueueCursor) -> u16 {
         cursor_index(cursor, self.slot_count_exp)
-    }
-
-    fn producer_cursor(&self) -> YCQueueCursor {
-        self.shared_metadata.producer_cursor.load(Ordering::Acquire)
-    }
-
-    fn consumer_cursor(&self) -> YCQueueCursor {
-        self.shared_metadata.consumer_cursor.load(Ordering::Acquire)
     }
 
     /// Returns the number of slots that have been produced (or are being produced into) but not yet consumed.
@@ -292,10 +300,11 @@ impl<'a> YCQueue<'a> {
     /// assert_eq!(queue.in_flight_count(), 1);
     /// ```
     #[inline]
-    pub fn in_flight_count(&self) -> u16 {
-        (self.producer_cursor() - self.consumer_cursor())
-            .try_into()
-            .expect("in_flight_count overflow")
+    pub fn in_flight_count(&mut self) -> u16 {
+        self.refresh_consumer_cursor();
+        self.refresh_producer_cursor();
+        self.slots_used_cached()
+            .expect("producer cursor should not trail consumer")
     }
 
     /// Returns the circular index that will be reserved by the next producer call.
@@ -304,7 +313,7 @@ impl<'a> YCQueue<'a> {
     /// The slot index measured modulo the queue capacity.
     #[inline]
     pub fn produce_idx(&self) -> u16 {
-        self.cursor_index(self.producer_cursor())
+        self.cursor_index(self.cached_producer_cursor)
     }
 
     /// Returns the circular index that will be reserved by the next consumer call.
@@ -313,13 +322,38 @@ impl<'a> YCQueue<'a> {
     /// The slot index measured modulo the queue capacity.
     #[inline]
     pub fn consume_idx(&self) -> u16 {
-        self.cursor_index(self.consumer_cursor())
+        self.cursor_index(self.cached_consumer_cursor)
     }
 
     /// Returns the total number of slots managed by this queue.
     #[inline]
     pub fn capacity(&self) -> u16 {
         self.slot_count
+    }
+
+    fn slots_used_cached(&self) -> Option<u16> {
+        let producer_cursor = self.cached_producer_cursor;
+        let consumer_cursor = self.cached_consumer_cursor;
+
+        // is producer is behind consumer, it (producer) is stale
+        if producer_cursor < consumer_cursor {
+            return None;
+        }
+
+        // if producer is more than slot_count ahead, consumer is stale
+        if producer_cursor > consumer_cursor + self.slot_count as u64 {
+            return None;
+        }
+
+        let used = u16::try_from(producer_cursor - consumer_cursor).unwrap_or_else(|_| {
+            panic!("distance should fit in u16: {producer_cursor} - {consumer_cursor}")
+        });
+        Some(used)
+    }
+
+    fn slots_available_cached(&self) -> Option<u16> {
+        let used = self.slots_used_cached()?;
+        Some(self.slot_count - used)
     }
 
     /// Reserve contiguous slots for producers, optionally in best-effort mode.
@@ -366,41 +400,71 @@ impl<'a> YCQueue<'a> {
             return Err(YCQueueError::InvalidArgs);
         }
 
+        let requested_slots = num_slots;
+        let mut refreshed = false;
         let old_producer = loop {
-            let consumer = self.shared_metadata.consumer_cursor.load(Ordering::Acquire);
-            let producer = self.shared_metadata.producer_cursor.load(Ordering::Acquire);
-            let producer_limit = cursor_advance(consumer, self.slot_count);
+            let producer = self.refresh_producer_cursor();
 
-            if (!best_effort && cursor_advance(producer, num_slots) > producer_limit)
-                || (best_effort && producer >= producer_limit)
-            {
-                return Err(YCQueueError::OutOfSpace);
+            // first check available slots against cached consumer, if it's too stale we re-try
+            let mut available_slots = match self.slots_available_cached() {
+                Some(slots) => slots,
+                None => {
+                    if !refreshed {
+                        self.refresh_consumer_cursor();
+                        refreshed = true;
+                        num_slots = requested_slots;
+                        continue;
+                    } else {
+                        return Err(YCQueueError::OutOfSpace);
+                    }
+                }
+            };
+
+            if best_effort {
+                num_slots = num_slots.min(available_slots).max(1);
             }
 
-            let available_slots = self.check_owner(
+            if num_slots > available_slots {
+                if !refreshed {
+                    self.refresh_consumer_cursor();
+                    refreshed = true;
+                    num_slots = requested_slots;
+                    continue;
+                } else {
+                    return Err(YCQueueError::OutOfSpace);
+                }
+            }
+
+            available_slots = self.check_owner(
                 self.cursor_index(producer),
                 num_slots,
                 YCQueueOwner::Producer,
             );
 
-            if (!best_effort && available_slots != num_slots)
-                || (best_effort && available_slots == 0)
-            {
-                return Err(YCQueueError::SlotNotReady);
+            if num_slots > available_slots {
+                if best_effort && available_slots > 0 {
+                    num_slots = available_slots;
+                } else {
+                    return Err(YCQueueError::SlotNotReady);
+                }
             }
 
             debug_assert!(available_slots > 0);
             debug_assert!(available_slots <= num_slots);
             num_slots = available_slots;
 
-            let next_producer = cursor_advance(producer, available_slots);
+            let new_producer = cursor_advance(producer, available_slots);
+
             match self.shared_metadata.producer_cursor.compare_exchange(
                 producer,
-                next_producer,
+                new_producer,
                 Ordering::AcqRel,
                 Ordering::Acquire,
             ) {
-                Ok(_) => break producer,
+                Ok(_) => {
+                    self.cached_producer_cursor = new_producer;
+                    break producer;
+                }
                 Err(_) => std::hint::spin_loop(),
             }
         };
@@ -609,17 +673,42 @@ impl<'a> YCQueue<'a> {
             return Err(YCQueueError::InvalidArgs);
         }
 
+        let requested_slots = num_slots;
+        let mut refreshed = false;
         let old_consumer = loop {
-            let producer = self.shared_metadata.producer_cursor.load(Ordering::Acquire);
-            let consumer = self.shared_metadata.consumer_cursor.load(Ordering::Acquire);
+            let consumer = self.refresh_consumer_cursor();
 
-            if (!best_effort && cursor_advance(consumer, num_slots) > producer)
-                || (best_effort && consumer >= producer)
-            {
-                return Err(YCQueueError::EmptyQueue);
+            // first check available slots against cached producer, if it's too stale we re-try
+            let mut available_slots = match self.slots_used_cached() {
+                Some(slots) => slots,
+                None => {
+                    if !refreshed {
+                        self.refresh_producer_cursor();
+                        refreshed = true;
+                        num_slots = requested_slots;
+                        continue;
+                    } else {
+                        return Err(YCQueueError::EmptyQueue);
+                    }
+                }
+            };
+
+            if best_effort {
+                num_slots = num_slots.min(available_slots).max(1);
             }
 
-            let available_slots = self.check_owner(
+            if num_slots > available_slots {
+                if !refreshed {
+                    self.refresh_producer_cursor();
+                    refreshed = true;
+                    num_slots = requested_slots;
+                    continue;
+                } else {
+                    return Err(YCQueueError::EmptyQueue);
+                }
+            }
+
+            available_slots = self.check_owner(
                 self.cursor_index(consumer),
                 num_slots,
                 YCQueueOwner::Consumer,
@@ -629,20 +718,26 @@ impl<'a> YCQueue<'a> {
             {
                 return Err(YCQueueError::SlotNotReady);
             }
+            if num_slots > available_slots {
+                debug_assert!(best_effort);
+                num_slots = available_slots;
+            }
 
             debug_assert!(available_slots > 0);
             debug_assert!(available_slots <= num_slots);
-            num_slots = available_slots;
 
-            let new_consumer = cursor_advance(consumer, num_slots);
+            let next_consumer = cursor_advance(consumer, available_slots);
 
             match self.shared_metadata.consumer_cursor.compare_exchange(
                 consumer,
-                new_consumer,
+                next_consumer,
                 Ordering::AcqRel,
                 Ordering::Acquire,
             ) {
-                Ok(_) => break consumer,
+                Ok(_) => {
+                    self.cached_consumer_cursor = next_consumer;
+                    break consumer;
+                }
                 Err(_) => std::hint::spin_loop(),
             }
         };
@@ -923,6 +1018,30 @@ mod tests {
         assert_eq!(queue.in_flight_count(), 0);
         assert_eq!(queue.produce_idx(), 3);
         assert_eq!(queue.consume_idx(), 3);
+    }
+
+    #[test]
+    fn in_flight_count_tracks_other_writers() {
+        use std::sync::atomic::Ordering;
+
+        let slot_count: u16 = 8;
+        let slot_size: u16 = 16;
+
+        let owned = YCQueueOwnedData::new(slot_count, slot_size);
+        let mut queue = YCQueue::from_owned_data(&owned).unwrap();
+
+        assert_eq!(queue.in_flight_count(), 0);
+
+        queue
+            .shared_metadata
+            .producer_cursor
+            .store(3, Ordering::Release);
+        queue
+            .shared_metadata
+            .consumer_cursor
+            .store(1, Ordering::Release);
+
+        assert_eq!(queue.in_flight_count(), 2);
     }
 
     #[test]
