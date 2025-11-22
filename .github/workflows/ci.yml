@@ -34,6 +34,9 @@ on:
         default: 'main'
         type: string
 
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -45,29 +48,45 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Harden Runner
+        uses: step-security/harden-runner@95d9a5deda9de15063e7595e9719c11c38c90ae2 # v2.13.2
+        if: matrix.os == 'ubuntu-latest' || matrix.os == 'windows-latest'
+        with:
+          egress-policy: audit
+
+      - name: Checkout code
+        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
         with:
           ref: ${{ (github.event_name == 'workflow_dispatch' && inputs.branch_to_run) || (github.event_name == 'pull_request' && github.head_ref) || github.ref_name }}
+
       - name: Update to latest stable Rust
         run: rustup update stable
+
       - name: Install toolchain components
         run: rustup component add rustfmt clippy
+
       - name: Cache Rust dependencies and build artifacts
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1 # v2.8.1
         with:
           shared-key: ${{ matrix.os }}
           cache-on-failure: true
+
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@132c875eef0d3e3be95c2d08d74e8559cbf74bdb # v2.62.55
         with:
           tool: cargo-nextest
+
       - name: Check formatting
         run: cargo fmt --all -- --check
+
       - name: Run clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
+
       - name: Build
         run: cargo build --all-features --verbose
+
       - name: Run tests
         run: cargo nextest run --profile ci --all-features --verbose
+
       - name: Run doc tests
         run: cargo test --doc --all-features --verbose
