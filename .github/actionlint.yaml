@@ -1,8 +1,8 @@
 # Configuration file for actionlint
-# This file defines custom runner labels for self-hosted runners
+# This file defines custom runner labels for GitHub-provided ARM runners
 
 self-hosted-runner:
-  # Custom runner labels used in this repository
+  # GitHub-provided ARM runner labels used in this repository
   labels:
     - ubuntu-22.04-arm
     - windows-11-arm

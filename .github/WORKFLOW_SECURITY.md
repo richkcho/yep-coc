@@ -28,7 +28,7 @@ All existing workflows have been updated with the following security improvement
 Jobs include `step-security/harden-runner` as the first step on supported platforms:
 ```yaml
 - name: Harden Runner
-  uses: step-security/harden-runner@5c7944e73c4c2a096b17a9cb74d65b6c2bbafbde # v2.9.1
+  uses: step-security/harden-runner@95d9a5deda9de15063e7595e9719c11c38c90ae2 # v2
   if: matrix.os == 'ubuntu-latest' || matrix.os == 'windows-latest'
   with:
     egress-policy: audit
@@ -52,7 +52,7 @@ uses: actions/checkout@v4
 
 **After:**
 ```yaml
-uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 ```
 
 **Why this matters:**
