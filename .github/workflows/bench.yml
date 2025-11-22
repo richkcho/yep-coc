@@ -110,7 +110,7 @@ jobs:
               `- Artifact: ${artifactName} (reports + baseline/compare data)`
             ].join('\n');
 
-            const commentId = '${{ steps.progress-comment.outputs.comment_id || '' }}';
+            const commentId = "${{ steps.progress-comment.outputs.comment_id }}";
             if (commentId) {
               await github.rest.issues.updateComment({
                 owner: context.repo.owner,
