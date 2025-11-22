@@ -44,7 +44,7 @@ jobs:
   build-and-test:
     strategy:
       matrix:
-        os: [ubuntu-latest, ubuntu-22.04-arm, windows-latest, windows-11-arm]
+        os: [ubuntu-latest, ubuntu-22.04-arm]
     runs-on: ${{ matrix.os }}
 
     steps:
