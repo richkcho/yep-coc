@@ -8,7 +8,7 @@ on:
         required: true
         type: number
       runner_label:
-        description: 'Label for the self-hosted benchmark runner (e.g. highmem-x86, perf-arm)'
+        description: 'Label for the self-hosted benchmark runner'
         required: true
         type: string
 
