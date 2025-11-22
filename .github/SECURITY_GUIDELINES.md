@@ -16,11 +16,13 @@ All pull requests that modify workflow files must pass actionlint checks. This l
 
 ### 2. Harden Runner
 
-All jobs include the `step-security/harden-runner` action as the first step. This provides:
+Jobs include the `step-security/harden-runner` action as the first step on supported platforms (ubuntu-latest, windows-latest). This provides:
 - Network egress filtering and monitoring
 - Audit logging of all network requests
 - Detection of suspicious behavior
 - Runtime security hardening
+
+**Note:** Harden Runner is conditionally applied to avoid compatibility issues with ARM runners.
 
 ### 3. Pinned Actions
 

@@ -24,13 +24,16 @@ The status check name to add is: `actionlint`
 All existing workflows have been updated with the following security improvements:
 
 #### a. Harden Runner
-Every job now includes `step-security/harden-runner` as the first step:
+Jobs include `step-security/harden-runner` as the first step on supported platforms:
 ```yaml
 - name: Harden Runner
   uses: step-security/harden-runner@5c7944e73c4c2a096b17a9cb74d65b6c2bbafbde # v2.9.1
+  if: matrix.os == 'ubuntu-latest' || matrix.os == 'windows-latest'
   with:
     egress-policy: audit
 ```
+
+**Note:** Harden Runner is conditionally applied only to `ubuntu-latest` and `windows-latest` runners, as it does not support ARM architectures.
 
 **Benefits:**
 - Monitors and audits all network egress
