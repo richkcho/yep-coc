@@ -1,6 +1,6 @@
 use std::sync::atomic::Ordering;
 
-use crate::queue_meta::YCQueueU64Meta;
+use crate::queue_meta::{YCQueueCursor, cursor_advance, cursor_index};
 
 use crate::utils::get_bit;
 use crate::{YCQueueError, YCQueueSharedMeta, utils};
@@ -28,6 +28,10 @@ pub struct YCQueue<'a> {
     slots: Vec<Option<&'a mut [u8]>>,
     slot_count: u16,
     slot_size: u16,
+    // slot count is a power of two, so we can store its exponent for fast calculations
+    slot_count_exp: u16,
+    cached_consumer_cursor: YCQueueCursor,
+    cached_producer_cursor: YCQueueCursor,
 }
 
 impl<'a> YCQueue<'a> {
@@ -70,11 +74,19 @@ impl<'a> YCQueue<'a> {
             return Err(YCQueueError::InvalidArgs);
         }
 
+        if !slot_count.is_power_of_two() {
+            return Err(YCQueueError::InvalidArgs);
+        }
+        let slot_count_exp = slot_count.trailing_zeros() as u16;
+
         Ok(YCQueue {
             shared_metadata,
             slots,
             slot_count: slot_count as u16,
             slot_size: slot_size as u16,
+            slot_count_exp,
+            cached_consumer_cursor: shared_metadata.consumer_cursor.load(Ordering::Acquire),
+            cached_producer_cursor: shared_metadata.producer_cursor.load(Ordering::Acquire),
         })
     }
 
@@ -252,9 +264,20 @@ impl<'a> YCQueue<'a> {
         Ok(())
     }
 
-    /// Snapshot the packed metadata that tracks indices and in-flight count.
-    fn get_u64_meta(&self) -> YCQueueU64Meta {
-        YCQueueU64Meta::from_u64(self.shared_metadata.u64_meta.load(Ordering::Acquire))
+    fn refresh_consumer_cursor(&mut self) -> YCQueueCursor {
+        let cursor = self.shared_metadata.consumer_cursor.load(Ordering::Acquire);
+        self.cached_consumer_cursor = cursor;
+        cursor
+    }
+
+    fn refresh_producer_cursor(&mut self) -> YCQueueCursor {
+        let cursor = self.shared_metadata.producer_cursor.load(Ordering::Acquire);
+        self.cached_producer_cursor = cursor;
+        cursor
+    }
+
+    fn cursor_index(&self, cursor: YCQueueCursor) -> u16 {
+        cursor_index(cursor, self.slot_count_exp)
     }
 
     /// Returns the number of slots that have been produced (or are being produced into) but not yet consumed.
@@ -277,8 +300,11 @@ impl<'a> YCQueue<'a> {
     /// assert_eq!(queue.in_flight_count(), 1);
     /// ```
     #[inline]
-    pub fn in_flight_count(&self) -> u16 {
-        self.get_u64_meta().in_flight
+    pub fn in_flight_count(&mut self) -> u16 {
+        self.refresh_consumer_cursor();
+        self.refresh_producer_cursor();
+        self.slots_used_cached()
+            .expect("producer cursor should not trail consumer")
     }
 
     /// Returns the circular index that will be reserved by the next producer call.
@@ -287,7 +313,7 @@ impl<'a> YCQueue<'a> {
     /// The slot index measured modulo the queue capacity.
     #[inline]
     pub fn produce_idx(&self) -> u16 {
-        self.get_u64_meta().produce_idx
+        self.cursor_index(self.cached_producer_cursor)
     }
 
     /// Returns the circular index that will be reserved by the next consumer call.
@@ -296,13 +322,38 @@ impl<'a> YCQueue<'a> {
     /// The slot index measured modulo the queue capacity.
     #[inline]
     pub fn consume_idx(&self) -> u16 {
-        self.get_u64_meta().consume_idx
+        self.cursor_index(self.cached_consumer_cursor)
     }
 
     /// Returns the total number of slots managed by this queue.
     #[inline]
     pub fn capacity(&self) -> u16 {
         self.slot_count
+    }
+
+    fn slots_used_cached(&self) -> Option<u16> {
+        let producer_cursor = self.cached_producer_cursor;
+        let consumer_cursor = self.cached_consumer_cursor;
+
+        // is producer is behind consumer, it (producer) is stale
+        if producer_cursor < consumer_cursor {
+            return None;
+        }
+
+        // if producer is more than slot_count ahead, consumer is stale
+        if producer_cursor > consumer_cursor + self.slot_count as u64 {
+            return None;
+        }
+
+        let used = u16::try_from(producer_cursor - consumer_cursor).unwrap_or_else(|_| {
+            panic!("distance should fit in u16: {producer_cursor} - {consumer_cursor}")
+        });
+        Some(used)
+    }
+
+    fn slots_available_cached(&self) -> Option<u16> {
+        let used = self.slots_used_cached()?;
+        Some(self.slot_count - used)
     }
 
     /// Reserve contiguous slots for producers, optionally in best-effort mode.
@@ -349,52 +400,79 @@ impl<'a> YCQueue<'a> {
             return Err(YCQueueError::InvalidArgs);
         }
 
-        let start_index = loop {
-            let value = self.shared_metadata.u64_meta.load(Ordering::Acquire);
-            let mut meta = YCQueueU64Meta::from_u64(value);
+        let requested_slots = num_slots;
+        let mut refreshed = false;
+        let old_producer = loop {
+            let producer = self.refresh_producer_cursor();
 
-            if meta.in_flight as u32 + num_slots as u32 > self.slot_count as u32 {
-                return Err(YCQueueError::OutOfSpace);
+            // first check available slots against cached consumer, if it's too stale we re-try
+            let mut available_slots = match self.slots_available_cached() {
+                Some(slots) => slots,
+                None => {
+                    if !refreshed {
+                        self.refresh_consumer_cursor();
+                        refreshed = true;
+                        num_slots = requested_slots;
+                        continue;
+                    } else {
+                        return Err(YCQueueError::OutOfSpace);
+                    }
+                }
+            };
+
+            if best_effort {
+                num_slots = num_slots.min(available_slots).max(1);
             }
 
-            // make sure all the slots we want are owned by the producer
-            let available_slots =
-                self.check_owner(meta.produce_idx, num_slots, YCQueueOwner::Producer);
+            if num_slots > available_slots {
+                if !refreshed {
+                    self.refresh_consumer_cursor();
+                    refreshed = true;
+                    num_slots = requested_slots;
+                    continue;
+                } else {
+                    return Err(YCQueueError::OutOfSpace);
+                }
+            }
 
-            if (!best_effort && available_slots != num_slots)
-                || (best_effort && available_slots == 0)
-            {
-                return Err(YCQueueError::SlotNotReady);
+            available_slots = self.check_owner(
+                self.cursor_index(producer),
+                num_slots,
+                YCQueueOwner::Producer,
+            );
+
+            if num_slots > available_slots {
+                if best_effort && available_slots > 0 {
+                    num_slots = available_slots;
+                } else {
+                    return Err(YCQueueError::SlotNotReady);
+                }
             }
 
             debug_assert!(available_slots > 0);
             debug_assert!(available_slots <= num_slots);
-
             num_slots = available_slots;
-            let produce_idx = meta.produce_idx;
-            meta.in_flight += num_slots;
-            meta.produce_idx += num_slots;
-            // wrap around if needed
-            if meta.produce_idx >= self.slot_count {
-                // TODO: tag as cold path
-                meta.produce_idx -= self.slot_count;
-            }
 
-            let new_value = meta.to_u64();
-            match self.shared_metadata.u64_meta.compare_exchange(
-                value,
-                new_value,
+            let new_producer = cursor_advance(producer, available_slots);
+
+            match self.shared_metadata.producer_cursor.compare_exchange(
+                producer,
+                new_producer,
                 Ordering::AcqRel,
                 Ordering::Acquire,
             ) {
-                Ok(_) => break produce_idx,
+                Ok(_) => {
+                    self.cached_producer_cursor = new_producer;
+                    break producer;
+                }
                 Err(_) => continue,
             }
         };
 
         let mut slots = Vec::with_capacity(num_slots as usize);
-        let mut index = start_index;
+        let mut cursor = old_producer;
         for _ in 0..num_slots {
+            let index = self.cursor_index(cursor);
             debug_assert_eq!(self.get_owner(index), YCQueueOwner::Producer);
 
             let slot_data = self.slots[index as usize].take();
@@ -403,12 +481,7 @@ impl<'a> YCQueue<'a> {
                 None => panic!("We double-loaned out produce index {index:?}"),
             }
 
-            index += 1;
-            // wrap around if needed
-            if index >= self.slot_count {
-                // TODO: tag as cold path
-                index -= self.slot_count;
-            }
+            cursor = cursor_advance(cursor, 1);
         }
 
         Ok(slots)
@@ -600,49 +673,79 @@ impl<'a> YCQueue<'a> {
             return Err(YCQueueError::InvalidArgs);
         }
 
-        let start_index = loop {
-            let value = self.shared_metadata.u64_meta.load(Ordering::Acquire);
-            let mut meta = YCQueueU64Meta::from_u64(value);
+        let requested_slots = num_slots;
+        let mut refreshed = false;
+        let old_consumer = loop {
+            let consumer = self.refresh_consumer_cursor();
 
-            if meta.in_flight < num_slots {
-                return Err(YCQueueError::EmptyQueue);
+            // first check available slots against cached producer, if it's too stale we re-try
+            let mut available_slots = match self.slots_used_cached() {
+                Some(slots) => slots,
+                None => {
+                    if !refreshed {
+                        self.refresh_producer_cursor();
+                        refreshed = true;
+                        num_slots = requested_slots;
+                        continue;
+                    } else {
+                        return Err(YCQueueError::EmptyQueue);
+                    }
+                }
+            };
+
+            if best_effort {
+                num_slots = num_slots.min(available_slots).max(1);
             }
 
-            let available_slots =
-                self.check_owner(meta.consume_idx, num_slots, YCQueueOwner::Consumer);
+            if num_slots > available_slots {
+                if !refreshed {
+                    self.refresh_producer_cursor();
+                    refreshed = true;
+                    num_slots = requested_slots;
+                    continue;
+                } else {
+                    return Err(YCQueueError::EmptyQueue);
+                }
+            }
+
+            available_slots = self.check_owner(
+                self.cursor_index(consumer),
+                num_slots,
+                YCQueueOwner::Consumer,
+            );
             if (!best_effort && available_slots != num_slots)
                 || (best_effort && available_slots == 0)
             {
                 return Err(YCQueueError::SlotNotReady);
             }
+            if num_slots > available_slots {
+                debug_assert!(best_effort);
+                num_slots = available_slots;
+            }
 
             debug_assert!(available_slots > 0);
             debug_assert!(available_slots <= num_slots);
-            num_slots = available_slots;
 
-            let consume_idx = meta.consume_idx;
-            let mut next_idx = consume_idx as u32 + num_slots as u32;
-            if next_idx >= self.slot_count as u32 {
-                next_idx -= self.slot_count as u32;
-            }
-            meta.consume_idx = next_idx as u16;
-            meta.in_flight -= num_slots;
+            let next_consumer = cursor_advance(consumer, available_slots);
 
-            let new_value = meta.to_u64();
-            match self.shared_metadata.u64_meta.compare_exchange(
-                value,
-                new_value,
+            match self.shared_metadata.consumer_cursor.compare_exchange(
+                consumer,
+                next_consumer,
                 Ordering::AcqRel,
                 Ordering::Acquire,
             ) {
-                Ok(_) => break consume_idx,
+                Ok(_) => {
+                    self.cached_consumer_cursor = next_consumer;
+                    break consumer;
+                }
                 Err(_) => continue,
             }
         };
 
         let mut slots = Vec::with_capacity(num_slots as usize);
-        let mut index = start_index;
+        let mut cursor = old_consumer;
         for _ in 0..num_slots {
+            let index = self.cursor_index(cursor);
             debug_assert_eq!(self.get_owner(index), YCQueueOwner::Consumer);
 
             let slot_data = self.slots[index as usize].take();
@@ -651,10 +754,7 @@ impl<'a> YCQueue<'a> {
                 None => panic!("We double-loaned out consume index {index:?}"),
             }
 
-            index += 1;
-            if index >= self.slot_count {
-                index -= self.slot_count;
-            }
+            cursor = cursor_advance(cursor, 1);
         }
 
         Ok(slots)
@@ -910,6 +1010,30 @@ mod tests {
         assert_eq!(queue.in_flight_count(), 0);
         assert_eq!(queue.produce_idx(), 3);
         assert_eq!(queue.consume_idx(), 3);
+    }
+
+    #[test]
+    fn in_flight_count_tracks_other_writers() {
+        use std::sync::atomic::Ordering;
+
+        let slot_count: u16 = 8;
+        let slot_size: u16 = 16;
+
+        let owned = YCQueueOwnedData::new(slot_count, slot_size);
+        let mut queue = YCQueue::from_owned_data(&owned).unwrap();
+
+        assert_eq!(queue.in_flight_count(), 0);
+
+        queue
+            .shared_metadata
+            .producer_cursor
+            .store(3, Ordering::Release);
+        queue
+            .shared_metadata
+            .consumer_cursor
+            .store(1, Ordering::Release);
+
+        assert_eq!(queue.in_flight_count(), 2);
     }
 
     #[test]

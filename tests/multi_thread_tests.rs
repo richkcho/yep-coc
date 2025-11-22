@@ -656,7 +656,7 @@ mod multi_thread_tests {
             "large consumer never completed a batch"
         );
 
-        let final_queue = YCQueue::from_owned_data(&owned_data).unwrap();
+        let mut final_queue = YCQueue::from_owned_data(&owned_data).unwrap();
         assert_eq!(final_queue.in_flight_count(), 0);
         assert_eq!(final_queue.produce_idx(), final_queue.consume_idx());
     }
