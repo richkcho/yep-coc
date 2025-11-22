@@ -34,7 +34,13 @@ jobs:
       github.event.comment.user.login == github.repository_owner &&
       contains(github.event.comment.body, 'stamp pls')
     steps:
-      - uses: hmarr/auto-approve-action@v4
+      - name: Harden Runner
+        uses: step-security/harden-runner@5c7944e73c4c2a096b17a9cb74d65b6c2bbafbde # v2.9.1
+        with:
+          egress-policy: audit
+
+      - name: Auto-approve PR
+        uses: hmarr/auto-approve-action@b40d6c9ed2371bb2d980c6adcb4396a3a3e79f0d # v4.0.0
         with:
           github-token: ${{ secrets.AUTO_APPROVER_PAT_TOKEN }}
           pull-request-number: ${{ github.event.issue.number }}
