@@ -14,6 +14,7 @@ A new workflow has been added to automatically lint all GitHub Actions workflow 
 - Configured to fail on errors (`fail_on_error: true`)
 - Uses pinned actions and minimal permissions
 - Includes harden-runner for security
+- Configured with `.github/actionlint.yaml` to recognize custom runner labels (`ubuntu-22.04-arm`, `windows-11-arm`)
 
 **This should be configured as a required status check in branch protection rules.**
 
