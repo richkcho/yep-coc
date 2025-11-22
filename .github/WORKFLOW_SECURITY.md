@@ -17,6 +17,8 @@ A new workflow has been added to automatically lint all GitHub Actions workflow 
 
 **This should be configured as a required status check in branch protection rules.**
 
+The status check name to add is: `actionlint`
+
 ### 2. Security Hardening Applied to All Workflows
 
 All existing workflows have been updated with the following security improvements:
@@ -108,8 +110,8 @@ To enforce these security practices, configure the following in GitHub repositor
 
 ```
 ✅ Require status checks to pass before merging
-  ✅ Actionlint
-  ✅ build-and-test (all matrix variations)
+  ✅ actionlint (status check from the actionlint workflow)
+  ✅ build-and-test (all matrix variations from the CI workflow)
 ✅ Require branches to be up to date before merging
 ✅ Do not allow bypassing the above settings
 ✅ Require linear history (optional but recommended)
