@@ -6,6 +6,7 @@ cfg_if::cfg_if! {
 }
 
 use crate::{YCQueue, YCQueueError, YCQueueSharedMeta};
+use std::mem::size_of;
 use std::sync::atomic::{AtomicU16, AtomicU64};
 use yep_cache_line_size::{CacheLevel, CacheType, get_cache_line_size};
 
@@ -20,12 +21,34 @@ fn cache_line_size() -> usize {
 
 /// Cache-line padded atomic wrapper to keep heavily contended values isolated for owned metadata.
 #[derive(Debug)]
-#[repr(align(64))]
-pub struct CachePaddedAtomicU64(AtomicU64);
+pub struct CachePaddedAtomicU64 {
+    storage: Box<[AtomicU64]>,
+    aligned_index: usize,
+}
 
 impl CachePaddedAtomicU64 {
-    pub(crate) const fn new(value: u64) -> Self {
-        CachePaddedAtomicU64(AtomicU64::new(value))
+    pub(crate) fn new(value: u64) -> Self {
+        let line_size = cache_line_size();
+        let atoms_per_line = (line_size / size_of::<u64>()).max(1);
+
+        let mut storage = Vec::with_capacity(atoms_per_line);
+        for _ in 0..atoms_per_line {
+            storage.push(AtomicU64::new(value));
+        }
+        let storage = storage.into_boxed_slice();
+
+        let aligned_index = (0..storage.len())
+            .find(|i| (unsafe { storage.as_ptr().add(*i) } as usize).is_multiple_of(line_size))
+            .unwrap_or(0);
+
+        debug_assert!(
+            (unsafe { storage.as_ptr().add(aligned_index) } as usize).is_multiple_of(line_size)
+        );
+
+        CachePaddedAtomicU64 {
+            storage,
+            aligned_index,
+        }
     }
 }
 
@@ -33,13 +56,13 @@ impl std::ops::Deref for CachePaddedAtomicU64 {
     type Target = AtomicU64;
 
     fn deref(&self) -> &Self::Target {
-        &self.0
+        &self.storage[self.aligned_index]
     }
 }
 
 impl std::ops::DerefMut for CachePaddedAtomicU64 {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
+        &mut self.storage[self.aligned_index]
     }
 }
 
@@ -253,6 +276,16 @@ impl<'a> YCFutexQueue<'a> {
 mod queue_alloc_helpers_tests {
     use super::*;
     use std::sync::atomic::Ordering;
+
+    #[test]
+    fn cache_padded_atomic_is_aligned() {
+        let atomic = CachePaddedAtomicU64::new(7);
+        let ptr = (&*atomic as *const AtomicU64) as usize;
+        let line_size = cache_line_size();
+
+        assert_eq!(ptr % line_size, 0);
+        assert_eq!(atomic.load(Ordering::Relaxed), 7);
+    }
 
     #[test]
     fn test_shared_meta() {
