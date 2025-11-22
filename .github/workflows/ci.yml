@@ -49,13 +49,13 @@ jobs:
 
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@95d9a5deda9de15063e7595e9719c11c38c90ae2 # v2
+        uses: step-security/harden-runner@95d9a5deda9de15063e7595e9719c11c38c90ae2 # v2.13.2
         if: matrix.os == 'ubuntu-latest' || matrix.os == 'windows-latest'
         with:
           egress-policy: audit
 
       - name: Checkout code
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
         with:
           ref: ${{ (github.event_name == 'workflow_dispatch' && inputs.branch_to_run) || (github.event_name == 'pull_request' && github.head_ref) || github.ref_name }}
 
@@ -66,13 +66,13 @@ jobs:
         run: rustup component add rustfmt clippy
 
       - name: Cache Rust dependencies and build artifacts
-        uses: Swatinem/rust-cache@7939da402645ba29a2df566723491a2c856e8f8a # v2
+        uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1 # v2.8.1
         with:
           shared-key: ${{ matrix.os }}
           cache-on-failure: true
 
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@132c875eef0d3e3be95c2d08d74e8559cbf74bdb # v2
+        uses: taiki-e/install-action@132c875eef0d3e3be95c2d08d74e8559cbf74bdb # v2.62.55
         with:
           tool: cargo-nextest
 

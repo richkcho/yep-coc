@@ -10,11 +10,11 @@ A new workflow has been added to automatically lint all GitHub Actions workflow 
 
 **Features:**
 - Runs on PRs that modify workflow files
-- Uses `reviewdog/action-actionlint` for detailed error reporting
+- Uses `reviewdog/action-actionlint` (v1.58.0+) for detailed error reporting
 - Configured to fail on errors (`fail_on_error: true`)
 - Uses pinned actions and minimal permissions
 - Includes harden-runner for security
-- Configured with `.github/actionlint.yaml` to recognize custom runner labels (`ubuntu-22.04-arm`, `windows-11-arm`)
+- Latest version has built-in support for GitHub-provided ARM runners (`ubuntu-22.04-arm`, `windows-11-arm`)
 
 **This should be configured as a required status check in branch protection rules.**
 
@@ -28,7 +28,7 @@ All existing workflows have been updated with the following security improvement
 Jobs include `step-security/harden-runner` as the first step on supported platforms:
 ```yaml
 - name: Harden Runner
-  uses: step-security/harden-runner@95d9a5deda9de15063e7595e9719c11c38c90ae2 # v2
+  uses: step-security/harden-runner@95d9a5deda9de15063e7595e9719c11c38c90ae2 # v2.13.2
   if: matrix.os == 'ubuntu-latest' || matrix.os == 'windows-latest'
   with:
     egress-policy: audit
@@ -52,7 +52,7 @@ uses: actions/checkout@v4
 
 **After:**
 ```yaml
-uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
 ```
 
 **Why this matters:**
