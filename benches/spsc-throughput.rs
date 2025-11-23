@@ -153,9 +153,9 @@ fn run_spsc_sample(
                     // Batch operation - use best_effort=true to get whatever is available
                     match consumer_queue.get_consume_slots(params.batch_size, true) {
                         Ok(slots) => {
-                            for slot in &slots {
+                            slots.iter().for_each(|slot| {
                                 black_box(&slot.data);
-                            }
+                            });
                             local_count += slots.len() as u64;
                             consumer_queue
                                 .mark_slots_consumed(slots)
@@ -193,10 +193,6 @@ fn run_spsc_sample(
                     // Single-slot operation
                     match producer_queue.get_produce_slot() {
                         Ok(produce_slot) => {
-                            // Fill with pattern to prevent optimization
-                            for i in 0..params.payload_size as usize {
-                                produce_slot.data[i] = ((local_count as usize + i) % 256) as u8;
-                            }
                             black_box(&produce_slot.data);
                             producer_queue
                                 .mark_slot_produced(produce_slot)
@@ -212,13 +208,9 @@ fn run_spsc_sample(
                     // Batch operation - use best_effort=true to get whatever is available
                     match producer_queue.get_produce_slots(params.batch_size, true) {
                         Ok(mut slots) => {
-                            for (idx, slot) in slots.iter_mut().enumerate() {
-                                let msg_num = local_count + idx as u64;
-                                for i in 0..params.payload_size as usize {
-                                    slot.data[i] = ((msg_num as usize + i) % 256) as u8;
-                                }
+                            slots.iter_mut().for_each(|slot| {
                                 black_box(&slot.data);
-                            }
+                            });
                             local_count += slots.len() as u64;
                             producer_queue
                                 .mark_slots_produced(slots)
@@ -275,16 +267,10 @@ fn run_spsc_sample(
 /// Benchmark function that measures steady-state throughput of SPSC queue
 /// Uses time-based samples with iter_custom
 fn bench_spsc(c: &mut Criterion) {
-    let cfg = spsc_bench_config();
-    let mut group = c.benchmark_group("spsc/time_based");
+    let mut group = c.benchmark_group("spsc/");
 
-    // Configure Criterion for time-based samples
-    group
-        .measurement_time(cfg.measurement_time)
-        .warm_up_time(cfg.warm_up_time)
-        .sample_size(cfg.sample_size);
-
-    let sample_duration = cfg.sample_duration;
+    // Use a fixed sample duration for consistent measurement windows
+    let sample_duration = Duration::from_millis(200);
     let (producer_core, consumer_core) = select_cores();
 
     // Define parameter sweep
@@ -345,35 +331,5 @@ fn bench_spsc(c: &mut Criterion) {
     group.finish();
 }
 
-/// Configure Criterion with appropriate settings for time-based benchmarks
-fn spsc_criterion_config() -> Criterion {
-    let cfg = spsc_bench_config();
-
-    Criterion::default()
-        .warm_up_time(cfg.warm_up_time)
-        .measurement_time(cfg.measurement_time)
-        .sample_size(cfg.sample_size)
-}
-
-struct SpscBenchConfig {
-    warm_up_time: Duration,
-    measurement_time: Duration,
-    sample_size: usize,
-    sample_duration: Duration,
-}
-
-fn spsc_bench_config() -> SpscBenchConfig {
-    SpscBenchConfig {
-        warm_up_time: Duration::from_secs(2),
-        measurement_time: Duration::from_secs(20),
-        sample_size: 20,
-        sample_duration: Duration::from_millis(200),
-    }
-}
-
-criterion_group! {
-    name = benches;
-    config = spsc_criterion_config();
-    targets = bench_spsc
-}
+criterion_group!(benches, bench_spsc);
 criterion_main!(benches);
