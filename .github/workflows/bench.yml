@@ -231,13 +231,16 @@ jobs:
             }
             # Capture status lines that follow change lines
             /Performance has regressed/ {
-              current_status = "Regressed"
+              current_status = "⚠️ Regressed"
             }
             /Performance has improved/ {
-              current_status = "Improved"
+              current_status = "✅ Improved"
             }
             /No change in performance detected/ {
-              current_status = "No Change"
+              current_status = "➖ No Change"
+            }
+            /Change within noise threshold/ {
+              current_status = "➖ No Change (within noise)"
             }
             # Handle the last benchmark at end of file
             END {
@@ -246,7 +249,6 @@ jobs:
                 if (index(display_name, benchmark_group) == 1) {
                   display_name = substr(display_name, length(benchmark_group) + 1)
                 }
-                # Only output if we have a status (no random "Changed" emoji)
                 if (current_status != "") {
                   print "| `" display_name "` | " current_change " | " current_status " |"
                 }
