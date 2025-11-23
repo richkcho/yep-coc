@@ -31,6 +31,7 @@
 //! - Throughput reported in messages/second
 
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Barrier};
 use std::thread;
@@ -63,6 +64,26 @@ impl Params {
     }
 }
 
+/// Simple exponential backoff: spin a little before yielding to keep threads resident.
+fn backoff(pow: &mut u8) {
+    if *pow < 6 {
+        let spins = 1 << *pow;
+        for _ in 0..spins {
+            std::hint::spin_loop();
+        }
+        *pow += 1;
+    } else {
+        thread::yield_now();
+    }
+}
+
+#[derive(Debug, Clone)]
+struct CoreInfo {
+    id: usize,
+    package_id: Option<u32>,
+    core_id: Option<u32>,
+}
+
 /// Find two distinct CPU cores to pin threads to, preferring physical cores
 /// Returns (producer_core_id, consumer_core_id)
 fn select_cores() -> (usize, usize) {
@@ -72,12 +93,59 @@ fn select_cores() -> (usize, usize) {
         panic!("Need at least 2 CPU cores for SPSC benchmark");
     }
 
-    // Try to select cores that are not SMT siblings
-    // For simplicity, pick first and middle core
-    let producer_core = 0;
-    let consumer_core = core_ids.len() / 2;
+    let core_info = core_ids
+        .iter()
+        .map(|cid| CoreInfo {
+            id: cid.id,
+            package_id: read_topology_value(cid.id, "physical_package_id"),
+            core_id: read_topology_value(cid.id, "core_id"),
+        })
+        .collect::<Vec<_>>();
+
+    if let Some((a, b)) = pick_nonsmt_same_package(&core_info) {
+        return (a, b);
+    }
+
+    // Fallback: pick first and middle core
+    let producer_core = core_info[0].id;
+    let consumer_core = core_info[core_info.len() / 2].id;
 
     (producer_core, consumer_core)
+}
+
+fn pick_nonsmt_same_package(core_info: &[CoreInfo]) -> Option<(usize, usize)> {
+    let mut by_pkg: HashMap<u32, Vec<&CoreInfo>> = HashMap::new();
+
+    for info in core_info {
+        if let Some(pkg) = info.package_id {
+            by_pkg.entry(pkg).or_default().push(info);
+        }
+    }
+
+    for infos in by_pkg.values() {
+        if infos.len() < 2 {
+            continue;
+        }
+
+        for (i, a) in infos.iter().enumerate() {
+            for b in infos.iter().skip(i + 1) {
+                if let (Some(core_a), Some(core_b)) = (a.core_id, b.core_id)
+                    && (core_a == core_b)
+                {
+                    continue;
+                }
+                return Some((a.id, b.id));
+            }
+        }
+    }
+
+    None
+}
+
+fn read_topology_value(cpu_id: usize, file: &str) -> Option<u32> {
+    let path = format!("/sys/devices/system/cpu/cpu{cpu_id}/topology/{file}");
+    let contents = std::fs::read_to_string(path).ok()?;
+    contents.trim().parse().ok()
 }
 
 /// Run a single SPSC sample for a fixed duration
@@ -89,9 +157,10 @@ fn run_spsc_sample(
     consumer_core: usize,
 ) -> (Duration, u64) {
     // Barrier to synchronize thread start
-    let barrier = Arc::new(Barrier::new(2));
+    let barrier = Arc::new(Barrier::new(3));
     let barrier_producer = Arc::clone(&barrier);
     let barrier_consumer = Arc::clone(&barrier);
+    let barrier_timer = Arc::clone(&barrier);
 
     // Stop flag to signal threads to terminate
     let stop = Arc::new(AtomicBool::new(false));
@@ -132,6 +201,7 @@ fn run_spsc_sample(
             barrier_consumer.wait();
 
             let mut local_count = 0u64;
+            let mut backoff_pow = 0;
 
             while !stop_consumer.load(Ordering::Relaxed) {
                 if params.batch_size == 1 {
@@ -143,9 +213,10 @@ fn run_spsc_sample(
                                 .mark_slot_consumed(consume_slot)
                                 .expect("Failed to mark slot consumed");
                             local_count += 1;
+                            backoff_pow = 0;
                         }
                         Err(YCQueueError::EmptyQueue) | Err(YCQueueError::SlotNotReady) => {
-                            thread::yield_now();
+                            backoff(&mut backoff_pow);
                         }
                         Err(e) => panic!("Consumer error: {:?}", e),
                     }
@@ -160,9 +231,10 @@ fn run_spsc_sample(
                             consumer_queue
                                 .mark_slots_consumed(slots)
                                 .expect("Failed to mark slots consumed");
+                            backoff_pow = 0;
                         }
                         Err(YCQueueError::EmptyQueue) | Err(YCQueueError::SlotNotReady) => {
-                            thread::yield_now();
+                            backoff(&mut backoff_pow);
                         }
                         Err(e) => panic!("Consumer error: {:?}", e),
                     }
@@ -187,6 +259,7 @@ fn run_spsc_sample(
             barrier_producer.wait();
 
             let mut local_count = 0u64;
+            let mut backoff_pow = 0;
 
             while !stop_producer.load(Ordering::Relaxed) {
                 if params.batch_size == 1 {
@@ -198,9 +271,10 @@ fn run_spsc_sample(
                                 .mark_slot_produced(produce_slot)
                                 .expect("Failed to mark slot produced");
                             local_count += 1;
+                            backoff_pow = 0;
                         }
                         Err(YCQueueError::OutOfSpace) | Err(YCQueueError::SlotNotReady) => {
-                            thread::yield_now();
+                            backoff(&mut backoff_pow);
                         }
                         Err(e) => panic!("Producer error: {:?}", e),
                     }
@@ -215,9 +289,10 @@ fn run_spsc_sample(
                             producer_queue
                                 .mark_slots_produced(slots)
                                 .expect("Failed to mark slots produced");
+                            backoff_pow = 0;
                         }
                         Err(YCQueueError::OutOfSpace) | Err(YCQueueError::SlotNotReady) => {
-                            thread::yield_now();
+                            backoff(&mut backoff_pow);
                         }
                         Err(e) => panic!("Producer error: {:?}", e),
                     }
@@ -230,10 +305,9 @@ fn run_spsc_sample(
         // Timer thread - wait for sample_duration then signal stop
         let timer_handle = s.spawn(move || {
             // Wait for both threads to be ready
-            // Small sleep to ensure threads have started
-            thread::sleep(Duration::from_millis(1));
+            barrier_timer.wait();
 
-            // Record start time
+            // Record start time exactly when all threads release
             let start = Instant::now();
             {
                 let mut st = start_time_timer.lock().unwrap();
