@@ -122,14 +122,14 @@ jobs:
           
           # Parse the benchmark output
           # Criterion outputs lines like:
-          # "spsc/time_based/cap32_payload32_batch1 time:   [...]"
+          # "spsc/cap32_payload32_batch1 time:   [...]"
           # "                                        change: [+2.5% +5.0% +7.5%] (p = 0.00 < 0.05)"
           # "Performance has improved/regressed." or "No change in performance detected."
           
           awk '
             BEGIN { 
               # Default benchmark group prefix to strip from display names
-              benchmark_group = "spsc/time_based/"
+              benchmark_group = "spsc/"
             }
             # Match benchmark name lines (pattern matches Criterion output format)
             $0 ~ "^[a-zA-Z_/]+ " && /time:/ {
