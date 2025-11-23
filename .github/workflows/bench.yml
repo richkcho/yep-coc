@@ -61,7 +61,7 @@ jobs:
 
       - name: Record main commit
         id: main_sha
-        run: echo "sha=$(git -C main-baseline rev-parse HEAD)" >> $GITHUB_OUTPUT
+        run: echo "sha=$(git -C main-baseline rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Update to latest stable Rust
         run: rustup update stable
@@ -111,10 +111,12 @@ jobs:
           # Parse Criterion output to extract benchmark results
           # Look for lines with "change:" to identify performance deltas
           
-          echo "## Benchmark Results" > results.md
-          echo "" >> results.md
-          echo "| Benchmark | Change | Status |" >> results.md
-          echo "|-----------|--------|--------|" >> results.md
+          {
+            echo "## Benchmark Results"
+            echo ""
+            echo "| Benchmark | Change | Status |"
+            echo "|-----------|--------|--------|"
+          } > results.md
           
           # Parse the benchmark output
           # Criterion outputs lines like:
@@ -164,12 +166,14 @@ jobs:
           ' bench_output.txt >> results.md
           
           # If no results were found, add a note
-          if [ $(wc -l < results.md) -le 3 ]; then
+          if [ "$(wc -l < results.md)" -le 3 ]; then
             echo "| No benchmark comparisons found | - | - |" >> results.md
           fi
           
-          echo "" >> results.md
-          echo "_Baseline: main @ \`${{ steps.main_sha.outputs.sha }}\`_" >> results.md
+          {
+            echo ""
+            echo "_Baseline: main @ \`${{ steps.main_sha.outputs.sha }}\`_"
+          } >> results.md
           
           # Output for next step
           cat results.md
