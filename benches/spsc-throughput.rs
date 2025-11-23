@@ -264,6 +264,17 @@ fn run_spsc_sample(
     (elapsed, items)
 }
 
+/// Check if verbose mode is enabled via command line args or environment variable
+fn is_verbose_mode() -> bool {
+    // Check if CRITERION_DEBUG environment variable is set
+    if std::env::var("CRITERION_DEBUG").is_ok() {
+        return true;
+    }
+
+    // Check command line arguments for --verbose or -v flag
+    std::env::args().any(|arg| arg == "--verbose" || arg == "-v")
+}
+
 /// Benchmark function that measures steady-state throughput of SPSC queue
 /// Uses time-based samples with iter_custom
 fn bench_spsc(c: &mut Criterion) {
@@ -292,8 +303,12 @@ fn bench_spsc(c: &mut Criterion) {
                 let (_probe_dt, probe_items) =
                     run_spsc_sample(&params, sample_duration, producer_core, consumer_core);
                 let items_per_sample = probe_items.max(1);
+
+                // this is telling criterion that the time reported below corresponds to processing
+                // items_per_sample items.
                 group.throughput(Throughput::Elements(items_per_sample));
 
+                let is_verbose = is_verbose_mode();
                 let id = params.id();
                 group.bench_with_input(BenchmarkId::from_parameter(id), &params, |b, params| {
                     b.iter_custom(|iters| {
@@ -311,9 +326,9 @@ fn bench_spsc(c: &mut Criterion) {
                             total_items += items;
                         }
 
-                        // Print average throughput for debugging
+                        // Print average throughput for debugging only when verbose is enabled
                         let secs = total.as_secs_f64();
-                        if secs > 0.0 {
+                        if secs > 0.0 && is_verbose {
                             let throughput = total_items as f64 / secs;
                             println!(
                                 "params={:?} iters={} total_items={} total_time={:?} throughput={:.0} items/s",
@@ -321,7 +336,8 @@ fn bench_spsc(c: &mut Criterion) {
                             );
                         }
 
-                        total
+                        // we can't return the time processed directly, so scale to account for items processed
+                        Duration::from_nanos((total.as_nanos() * total_items as u128 / (iters as u128 * items_per_sample as u128)) as u64)
                     });
                 });
             }
