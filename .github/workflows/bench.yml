@@ -87,8 +87,17 @@ jobs:
         working-directory: main-baseline
         run: cargo bench --bench spsc-throughput -- --save-baseline main
 
+      - name: Save baseline cache (before PR run)
+        if: steps.baseline-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ env.CARGO_TARGET_DIR }}/criterion
+          key: criterion-main-${{ inputs.runner_label }}-${{ steps.main_sha.outputs.sha }}
+
       - name: Run benchmarks for PR against main baseline
-        run: cargo bench --bench spsc-throughput -- --baseline main
+        id: bench-pr
+        run: |
+          cargo bench --bench spsc-throughput -- --baseline main 2>&1 | tee bench_output.txt
 
       - name: Upload criterion reports
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
@@ -96,15 +105,98 @@ jobs:
           name: pr-${{ inputs.pr_number }}-bench-${{ github.run_id }}
           path: ${{ env.CARGO_TARGET_DIR }}/criterion
 
+      - name: Parse benchmark results
+        id: parse-results
+        run: |
+          # Parse Criterion output to extract benchmark results
+          # Look for lines with "change:" to identify performance deltas
+          
+          echo "## Benchmark Results" > results.md
+          echo "" >> results.md
+          echo "| Benchmark | Change | Status |" >> results.md
+          echo "|-----------|--------|--------|" >> results.md
+          
+          # Parse the benchmark output
+          # Criterion outputs lines like:
+          # "spsc/time_based/cap32_payload32_batch1 time:   [...]"
+          # "                                        change: [+2.5% +5.0% +7.5%] (p = 0.00 < 0.05)"
+          # or "No change in performance detected."
+          
+          awk '
+            /^spsc\/time_based\// {
+              # Extract benchmark name
+              match($0, /^spsc\/time_based\/[^ ]+/, arr)
+              bench_name = arr[0]
+              # Store for next line
+              current_bench = bench_name
+            }
+            /change: \[/ {
+              # Extract change percentage range
+              match($0, /change: \[([^\]]+)\]/, arr)
+              change = arr[1]
+              
+              # Determine if regression or improvement
+              # Look for "Performance has regressed" or "Performance has improved"
+              status = "📊 Changed"
+              getline next_line
+              if (next_line ~ /Performance has regressed/) {
+                status = "⚠️ Regressed"
+              } else if (next_line ~ /Performance has improved/) {
+                status = "✅ Improved"
+              } else if (next_line ~ /No change in performance/) {
+                status = "➖ No Change"
+              }
+              
+              if (current_bench != "") {
+                # Remove "spsc/time_based/" prefix for cleaner display
+                sub(/^spsc\/time_based\//, "", current_bench)
+                print "| `" current_bench "` | " change " | " status " |"
+                current_bench = ""
+              }
+            }
+            /No change in performance detected/ {
+              if (current_bench != "") {
+                sub(/^spsc\/time_based\//, "", current_bench)
+                print "| `" current_bench "` | - | ➖ No Change |"
+                current_bench = ""
+              }
+            }
+          ' bench_output.txt >> results.md
+          
+          # If no results were found, add a note
+          if [ $(wc -l < results.md) -le 3 ]; then
+            echo "| No benchmark comparisons found | - | - |" >> results.md
+          fi
+          
+          echo "" >> results.md
+          echo "_Baseline: main @ \`${{ steps.main_sha.outputs.sha }}\`_" >> results.md
+          
+          # Output for next step
+          cat results.md
+
       - name: Comment benchmark artifact on PR
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         with:
           script: |
+            const fs = require('fs');
             const prNumber = Number('${{ inputs.pr_number }}');
             const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
             const artifactName = `pr-${prNumber}-bench-${context.runId}`;
+            
+            // Read parsed results
+            let resultsTable = '';
+            try {
+              resultsTable = fs.readFileSync('results.md', 'utf8');
+            } catch (err) {
+              resultsTable = '_No benchmark results could be parsed._';
+            }
+            
             const body = [
               `Benchmark run completed for PR #${prNumber}.`,
+              ``,
+              resultsTable,
+              ``,
+              `---`,
               ``,
               `- Run: ${runUrl}`,
               `- Artifact: ${artifactName} (reports + baseline/compare data)`
