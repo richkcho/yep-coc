@@ -126,9 +126,10 @@ jobs:
           
           awk '
             BEGIN { 
+              # Default benchmark group prefix to strip from display names
               benchmark_group = "spsc/time_based/"
             }
-            # Match benchmark name lines (flexible pattern for any benchmark group)
+            # Match benchmark name lines (pattern matches Criterion output format)
             $0 ~ "^[a-zA-Z_/]+ " && /time:/ {
               # Extract benchmark name (everything before "time:")
               match($0, /^[^ ]+/, arr)
@@ -194,7 +195,8 @@ jobs:
           ' bench_output.txt >> results.md
           
           # If no results were found (only header lines remain), add a note
-          result_count=$(tail -n +4 results.md | grep -c '|' || true)
+          # Count lines that look like benchmark results (containing backticks)
+          result_count=$(tail -n +4 results.md | grep -c '`' || true)
           if [ "$result_count" -eq 0 ]; then
             echo "| No benchmark comparisons found | - | - |" >> results.md
           fi
