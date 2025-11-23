@@ -63,8 +63,10 @@ jobs:
         id: main_sha
         run: echo "sha=$(git -C main-baseline rev-parse HEAD)" >> $GITHUB_OUTPUT
 
-      - name: Update to latest stable Rust
-        run: rustup update stable
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@0b1efabc08b657293548b77fb76cc02d26091c7e # stable channel installer
+        with:
+          toolchain: stable
 
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1 # v2.8.1
