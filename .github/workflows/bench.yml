@@ -122,29 +122,46 @@ jobs:
           
           # Parse the benchmark output
           # Criterion outputs lines like:
-          # "spsc/cap32_payload32_batch1 time:   [...]"
-          # "                                        change: [+2.5% +5.0% +7.5%] (p = 0.00 < 0.05)"
-          # "Performance has improved/regressed." or "No change in performance detected."
+          # "spsc//cap32_payload32_batch1"
+          # "                        time:   [201.34 ms 206.26 ms 210.69 ms]"
+          # "                 change:"
+          # "                        time:   [-8.2272% -5.7068% -3.1975%] (p = 0.00 < 0.05)"
+          # "                        Performance has improved."
           
           awk '
             BEGIN { 
               # Default benchmark group prefix to strip from display names
-              benchmark_group = "spsc/"
+              benchmark_group = "spsc//"
             }
-            # Match benchmark name lines (pattern matches Criterion output format)
-            $0 ~ "^[a-zA-Z_/]+ " && /time:/ {
-              # Extract benchmark name (everything before "time:")
-              match($0, /^[^ ]+/, arr)
-              bench_name = arr[0]
-              current_bench = bench_name
+            # Match benchmark name lines (lines that start with non-whitespace and contain /)
+            /^[^ \t]/ && /\// {
+              # If we have a previous benchmark with change data, output it
+              if (current_bench != "" && current_change != "") {
+                display_name = current_bench
+                if (index(display_name, benchmark_group) == 1) {
+                  display_name = substr(display_name, length(benchmark_group) + 1)
+                }
+                status = current_status != "" ? current_status : "📊 Changed"
+                print "| `" display_name "` | " current_change " | " status " |"
+              }
+              
+              # Start tracking new benchmark
+              current_bench = $0
+              current_change = ""
               current_status = ""
             }
-            # Look for "change:" lines which indicate comparison results
-            /change: \[/ {
-              # Extract change percentage range
-              match($0, /change: \[([^\]]+)\]/, arr)
+            # Look for "change:" header line
+            /^ *change:$/ {
+              in_change_section = 1
+              next
+            }
+            # After "change:" header, look for the time line with percentages
+            in_change_section == 1 && /^ *time: *\[/ {
+              # Extract change percentage range (the middle value from the three values)
+              match($0, /\[([^]]+)\]/, arr)
               change = arr[1]
               current_change = change
+              in_change_section = 0
             }
             # Capture status lines that follow change lines
             /Performance has regressed/ {
@@ -154,34 +171,7 @@ jobs:
               current_status = "✅ Improved"
             }
             /No change in performance detected/ {
-              if (current_bench != "") {
-                # Strip benchmark group prefix for cleaner display
-                display_name = current_bench
-                if (index(display_name, benchmark_group) == 1) {
-                  display_name = substr(display_name, length(benchmark_group) + 1)
-                }
-                print "| `" display_name "` | - | ➖ No Change |"
-                current_bench = ""
-              }
-            }
-            # When we see the next benchmark start, output the previous one if we have change data
-            $0 ~ "^[a-zA-Z_/]+ " && /time:/ && current_bench != "" && current_change != "" {
-              # Output previous benchmark before starting new one
-              display_name = current_bench
-              if (index(display_name, benchmark_group) == 1) {
-                display_name = substr(display_name, length(benchmark_group) + 1)
-              }
-              status = current_status != "" ? current_status : "📊 Changed"
-              print "| `" display_name "` | " current_change " | " status " |"
-              
-              # Reset for new benchmark
-              current_change = ""
-              current_status = ""
-              
-              # Then process the new benchmark name
-              match($0, /^[^ ]+/, arr)
-              bench_name = arr[0]
-              current_bench = bench_name
+              current_status = "➖ No Change"
             }
             # Handle the last benchmark at end of file
             END {
