@@ -26,11 +26,11 @@
 //! # Configuration
 //! - Sample duration: 200 milliseconds per sample
 //! - Measurement time: 20 seconds total
-//! - Sample size: 30 measurements
+//! - Sample size: 20 measurements
 //! - Warm-up time: 2 seconds
 //! - Throughput reported in messages/second
 
-use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
+use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Barrier};
 use std::thread;
@@ -275,21 +275,22 @@ fn run_spsc_sample(
 /// Benchmark function that measures steady-state throughput of SPSC queue
 /// Uses time-based samples with iter_custom
 fn bench_spsc(c: &mut Criterion) {
+    let cfg = spsc_bench_config();
     let mut group = c.benchmark_group("spsc/time_based");
 
     // Configure Criterion for time-based samples
     group
-        .measurement_time(Duration::from_secs(20))
-        .warm_up_time(Duration::from_secs(2))
-        .sample_size(30);
+        .measurement_time(cfg.measurement_time)
+        .warm_up_time(cfg.warm_up_time)
+        .sample_size(cfg.sample_size);
 
-    let sample_duration = Duration::from_millis(200);
+    let sample_duration = cfg.sample_duration;
     let (producer_core, consumer_core) = select_cores();
 
     // Define parameter sweep
-    let capacities = vec![256, 512, 1024];
-    let payload_sizes = vec![64, 256, 512];
-    let batch_sizes = vec![1, 8, 32];
+    let capacities = vec![32, 1024];
+    let payload_sizes = vec![32, 512];
+    let batch_sizes = vec![1, 16, 32];
 
     for capacity in &capacities {
         for payload_size in &payload_sizes {
@@ -299,6 +300,13 @@ fn bench_spsc(c: &mut Criterion) {
                     payload_size: *payload_size,
                     batch_size: *batch_size,
                 };
+
+                // Pre-run a sample to estimate items processed per iteration so Criterion can
+                // compute throughput instead of only showing the fixed sample duration.
+                let (_probe_dt, probe_items) =
+                    run_spsc_sample(&params, sample_duration, producer_core, consumer_core);
+                let items_per_sample = probe_items.max(1);
+                group.throughput(Throughput::Elements(items_per_sample));
 
                 let id = params.id();
                 group.bench_with_input(BenchmarkId::from_parameter(id), &params, |b, params| {
@@ -339,10 +347,28 @@ fn bench_spsc(c: &mut Criterion) {
 
 /// Configure Criterion with appropriate settings for time-based benchmarks
 fn spsc_criterion_config() -> Criterion {
+    let cfg = spsc_bench_config();
+
     Criterion::default()
-        .warm_up_time(Duration::from_secs(2))
-        .measurement_time(Duration::from_secs(20))
-        .sample_size(30)
+        .warm_up_time(cfg.warm_up_time)
+        .measurement_time(cfg.measurement_time)
+        .sample_size(cfg.sample_size)
+}
+
+struct SpscBenchConfig {
+    warm_up_time: Duration,
+    measurement_time: Duration,
+    sample_size: usize,
+    sample_duration: Duration,
+}
+
+fn spsc_bench_config() -> SpscBenchConfig {
+    SpscBenchConfig {
+        warm_up_time: Duration::from_secs(2),
+        measurement_time: Duration::from_secs(20),
+        sample_size: 20,
+        sample_duration: Duration::from_millis(200),
+    }
 }
 
 criterion_group! {
