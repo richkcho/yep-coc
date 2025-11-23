@@ -85,7 +85,7 @@ jobs:
       - name: Run baseline on main (only if missing)
         if: steps.baseline-cache.outputs.cache-hit != 'true'
         working-directory: main-baseline
-        run: cargo bench --bench spsc-throughput -- --save-baseline main
+        run: cargo bench --bench spsc-throughput -- --measurement-time 20 --sample-size 20 --save-baseline main
 
       - name: Save baseline cache (before PR run)
         if: steps.baseline-cache.outputs.cache-hit != 'true'
@@ -97,7 +97,7 @@ jobs:
       - name: Run benchmarks for PR against main baseline
         id: bench-pr
         run: |
-          cargo bench --bench spsc-throughput -- --baseline main 2>&1 | tee bench_output.txt
+          cargo bench --bench spsc-throughput -- --measurement-time 20 --sample-size 20 --baseline main 2>&1 | tee bench_output.txt
 
       - name: Upload criterion reports
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
