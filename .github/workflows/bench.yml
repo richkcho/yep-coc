@@ -122,51 +122,80 @@ jobs:
           # Criterion outputs lines like:
           # "spsc/time_based/cap32_payload32_batch1 time:   [...]"
           # "                                        change: [+2.5% +5.0% +7.5%] (p = 0.00 < 0.05)"
-          # or "No change in performance detected."
+          # "Performance has improved/regressed." or "No change in performance detected."
           
           awk '
-            /^spsc\/time_based\// {
-              # Extract benchmark name
-              match($0, /^spsc\/time_based\/[^ ]+/, arr)
-              bench_name = arr[0]
-              # Store for next line
-              current_bench = bench_name
+            BEGIN { 
+              benchmark_group = "spsc/time_based/"
             }
+            # Match benchmark name lines (flexible pattern for any benchmark group)
+            $0 ~ "^[a-zA-Z_/]+ " && /time:/ {
+              # Extract benchmark name (everything before "time:")
+              match($0, /^[^ ]+/, arr)
+              bench_name = arr[0]
+              current_bench = bench_name
+              current_status = ""
+            }
+            # Look for "change:" lines which indicate comparison results
             /change: \[/ {
               # Extract change percentage range
               match($0, /change: \[([^\]]+)\]/, arr)
               change = arr[1]
-              
-              # Determine if regression or improvement
-              # Look for "Performance has regressed" or "Performance has improved"
-              status = "📊 Changed"
-              getline next_line
-              if (next_line ~ /Performance has regressed/) {
-                status = "⚠️ Regressed"
-              } else if (next_line ~ /Performance has improved/) {
-                status = "✅ Improved"
-              } else if (next_line ~ /No change in performance/) {
-                status = "➖ No Change"
-              }
-              
-              if (current_bench != "") {
-                # Remove "spsc/time_based/" prefix for cleaner display
-                sub(/^spsc\/time_based\//, "", current_bench)
-                print "| `" current_bench "` | " change " | " status " |"
-                current_bench = ""
-              }
+              current_change = change
+            }
+            # Capture status lines that follow change lines
+            /Performance has regressed/ {
+              current_status = "⚠️ Regressed"
+            }
+            /Performance has improved/ {
+              current_status = "✅ Improved"
             }
             /No change in performance detected/ {
               if (current_bench != "") {
-                sub(/^spsc\/time_based\//, "", current_bench)
-                print "| `" current_bench "` | - | ➖ No Change |"
+                # Strip benchmark group prefix for cleaner display
+                display_name = current_bench
+                if (index(display_name, benchmark_group) == 1) {
+                  display_name = substr(display_name, length(benchmark_group) + 1)
+                }
+                print "| `" display_name "` | - | ➖ No Change |"
                 current_bench = ""
+              }
+            }
+            # When we see the next benchmark start, output the previous one if we have change data
+            $0 ~ "^[a-zA-Z_/]+ " && /time:/ && current_bench != "" && current_change != "" {
+              # Output previous benchmark before starting new one
+              display_name = current_bench
+              if (index(display_name, benchmark_group) == 1) {
+                display_name = substr(display_name, length(benchmark_group) + 1)
+              }
+              status = current_status != "" ? current_status : "📊 Changed"
+              print "| `" display_name "` | " current_change " | " status " |"
+              
+              # Reset for new benchmark
+              current_change = ""
+              current_status = ""
+              
+              # Then process the new benchmark name
+              match($0, /^[^ ]+/, arr)
+              bench_name = arr[0]
+              current_bench = bench_name
+            }
+            # Handle the last benchmark at end of file
+            END {
+              if (current_bench != "" && current_change != "") {
+                display_name = current_bench
+                if (index(display_name, benchmark_group) == 1) {
+                  display_name = substr(display_name, length(benchmark_group) + 1)
+                }
+                status = current_status != "" ? current_status : "📊 Changed"
+                print "| `" display_name "` | " current_change " | " status " |"
               }
             }
           ' bench_output.txt >> results.md
           
-          # If no results were found, add a note
-          if [ "$(wc -l < results.md)" -le 3 ]; then
+          # If no results were found (only header lines remain), add a note
+          result_count=$(tail -n +4 results.md | grep -c '|' || true)
+          if [ "$result_count" -eq 0 ]; then
             echo "| No benchmark comparisons found | - | - |" >> results.md
           fi
           
