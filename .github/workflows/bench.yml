@@ -36,7 +36,8 @@ jobs:
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         with:
           script: |
-            const prNumber = Number('${{ inputs.pr_number }}');
+            // Parse PR number as integer (handle float inputs like "10.0")
+            const prNumber = parseInt('${{ inputs.pr_number }}', 10);
             const body = `Benchmark run started on runner label \`${{ inputs.runner_label }}\`...`;
             const { data: comment } = await github.rest.issues.createComment({
               owner: context.repo.owner,
@@ -116,8 +117,8 @@ jobs:
           {
             echo "## Benchmark Results"
             echo ""
-            echo "| Benchmark | Change | Status |"
-            echo "|-----------|--------|--------|"
+            echo "| Benchmark | Runtime Change | Status |"
+            echo "|-----------|----------------|--------|"
           } > results.md
           
           # Parse the benchmark output
@@ -141,14 +142,28 @@ jobs:
                 if (index(display_name, benchmark_group) == 1) {
                   display_name = substr(display_name, length(benchmark_group) + 1)
                 }
-                status = current_status != "" ? current_status : "📊 Changed"
-                print "| `" display_name "` | " current_change " | " status " |"
+                # Only output if we have a status (no random "Changed" emoji)
+                if (current_status != "") {
+                  print "| `" display_name "` | " current_change " | " current_status " |"
+                }
               }
               
               # Start tracking new benchmark
               current_bench = $0
               current_change = ""
               current_status = ""
+              current_time = ""
+              time_unit = ""
+            }
+            # Look for current time in "time:" line before change section
+            /^ *time: *\[/ && !in_change_section {
+              # Extract the middle value from [lower middle upper]
+              # Format: [201.34 ms 206.26 ms 210.69 ms]
+              # After split: [1]=201.34 [2]=ms [3]=206.26 [4]=ms [5]=210.69 [6]=ms
+              match($0, /\[([^]]+)\]/, arr)
+              split(arr[1], times, " ")
+              current_time = times[3]
+              time_unit = times[4]
             }
             # Look for "change:" header line
             /^ *change:$/ {
@@ -158,20 +173,49 @@ jobs:
             # After "change:" header, look for the time line with percentages
             in_change_section == 1 && /^ *time: *\[/ {
               # Extract change percentage range (the middle value from the three values)
+              # Format: [-8.2272% -5.7068% -3.1975%]
+              # After split: [1]=-8.2272% [2]=-5.7068% [3]=-3.1975%
               match($0, /\[([^]]+)\]/, arr)
-              change = arr[1]
-              current_change = change
+              split(arr[1], changes, " ")
+              change_pct = changes[2]
+              
+              # Calculate actual time change if we have current time
+              # The "time:" line before "change:" shows the current (PR) time
+              # The change% = (current - baseline) / baseline * 100
+              # So: baseline = current / (1 + change%/100)
+              # And: time_delta = current - baseline
+              if (current_time != "") {
+                # Extract percentage value without % sign
+                pct_val = change_pct
+                gsub(/%/, "", pct_val)
+                
+                # Calculate the baseline time and delta
+                # baseline = current / (1 + pct_val/100)
+                baseline_val = current_time / (1 + pct_val / 100.0)
+                time_delta = current_time - baseline_val
+                
+                # Format the output with proper sign
+                if (time_delta >= 0) {
+                  current_change = sprintf("+%.2f %s (%s)", time_delta, time_unit, change_pct)
+                } else {
+                  current_change = sprintf("%.2f %s (%s)", time_delta, time_unit, change_pct)
+                }
+              } else {
+                # Fallback to just percentage if we cannot parse time
+                current_change = change_pct
+              }
+              
               in_change_section = 0
             }
             # Capture status lines that follow change lines
             /Performance has regressed/ {
-              current_status = "⚠️ Regressed"
+              current_status = "Regressed"
             }
             /Performance has improved/ {
-              current_status = "✅ Improved"
+              current_status = "Improved"
             }
             /No change in performance detected/ {
-              current_status = "➖ No Change"
+              current_status = "No Change"
             }
             # Handle the last benchmark at end of file
             END {
@@ -180,8 +224,10 @@ jobs:
                 if (index(display_name, benchmark_group) == 1) {
                   display_name = substr(display_name, length(benchmark_group) + 1)
                 }
-                status = current_status != "" ? current_status : "📊 Changed"
-                print "| `" display_name "` | " current_change " | " status " |"
+                # Only output if we have a status (no random "Changed" emoji)
+                if (current_status != "") {
+                  print "| `" display_name "` | " current_change " | " current_status " |"
+                }
               }
             }
           ' bench_output.txt >> results.md
@@ -202,11 +248,13 @@ jobs:
           cat results.md
 
       - name: Comment benchmark artifact on PR
+        if: success()
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         with:
           script: |
             const fs = require('fs');
-            const prNumber = Number('${{ inputs.pr_number }}');
+            // Parse PR number as integer (handle float inputs like "10.0")
+            const prNumber = parseInt('${{ inputs.pr_number }}', 10);
             const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
             const artifactName = `pr-${prNumber}-bench-${context.runId}`;
             
@@ -227,6 +275,38 @@ jobs:
               ``,
               `- Run: ${runUrl}`,
               `- Artifact: ${artifactName} (reports + baseline/compare data)`
+            ].join('\n');
+
+            const commentId = "${{ steps.progress-comment.outputs.comment_id }}";
+            if (commentId) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: commentId,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body,
+              });
+            }
+
+      - name: Comment benchmark failure on PR
+        if: failure()
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        with:
+          script: |
+            // Parse PR number as integer (handle float inputs like "10.0")
+            const prNumber = parseInt('${{ inputs.pr_number }}', 10);
+            const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            
+            const body = [
+              `⚠️ Benchmark run failed for PR #${prNumber}.`,
+              ``,
+              `Please check the [workflow run](${runUrl}) for details.`
             ].join('\n');
 
             const commentId = "${{ steps.progress-comment.outputs.comment_id }}";
