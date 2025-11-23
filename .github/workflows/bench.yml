@@ -162,8 +162,11 @@ jobs:
               # After split: [1]=201.34 [2]=ms [3]=206.26 [4]=ms [5]=210.69 [6]=ms
               match($0, /\[([^]]+)\]/, arr)
               split(arr[1], times, " ")
-              current_time = times[3]
-              time_unit = times[4]
+              # Verify we have enough elements (at least 4 for value and unit)
+              if (length(times) >= 4) {
+                current_time = times[3]
+                time_unit = times[4]
+              }
             }
             # Look for "change:" header line
             /^ *change:$/ {
@@ -177,32 +180,42 @@ jobs:
               # After split: [1]=-8.2272% [2]=-5.7068% [3]=-3.1975%
               match($0, /\[([^]]+)\]/, arr)
               split(arr[1], changes, " ")
-              change_pct = changes[2]
               
-              # Calculate actual time change if we have current time
-              # The "time:" line before "change:" shows the current (PR) time
-              # The change% = (current - baseline) / baseline * 100
-              # So: baseline = current / (1 + change%/100)
-              # And: time_delta = current - baseline
-              if (current_time != "") {
-                # Extract percentage value without % sign
-                pct_val = change_pct
-                gsub(/%/, "", pct_val)
+              # Verify we have at least 2 elements
+              if (length(changes) >= 2) {
+                change_pct = changes[2]
                 
-                # Calculate the baseline time and delta
-                # baseline = current / (1 + pct_val/100)
-                baseline_val = current_time / (1 + pct_val / 100.0)
-                time_delta = current_time - baseline_val
-                
-                # Format the output with proper sign
-                if (time_delta >= 0) {
-                  current_change = sprintf("+%.2f %s (%s)", time_delta, time_unit, change_pct)
+                # Calculate actual time change if we have current time
+                # The "time:" line before "change:" shows the current (PR) time
+                # The change% = (current - baseline) / baseline * 100
+                # So: baseline = current / (1 + change%/100)
+                # And: time_delta = current - baseline
+                if (current_time != "" && time_unit != "") {
+                  # Extract percentage value without % sign
+                  pct_val = change_pct
+                  gsub(/%/, "", pct_val)
+                  
+                  # Guard against division by zero (when change is exactly -100%)
+                  denominator = 1 + pct_val / 100.0
+                  if (denominator != 0) {
+                    # Calculate the baseline time and delta
+                    baseline_val = current_time / denominator
+                    time_delta = current_time - baseline_val
+                    
+                    # Format the output with proper sign
+                    if (time_delta >= 0) {
+                      current_change = sprintf("+%.2f %s (%s)", time_delta, time_unit, change_pct)
+                    } else {
+                      current_change = sprintf("%.2f %s (%s)", time_delta, time_unit, change_pct)
+                    }
+                  } else {
+                    # Edge case: -100% change means time went to zero
+                    current_change = sprintf("%.2f %s (%s)", -current_time, time_unit, change_pct)
+                  }
                 } else {
-                  current_change = sprintf("%.2f %s (%s)", time_delta, time_unit, change_pct)
+                  # Fallback to just percentage if we cannot parse time
+                  current_change = change_pct
                 }
-              } else {
-                # Fallback to just percentage if we cannot parse time
-                current_change = change_pct
               }
               
               in_change_section = 0
