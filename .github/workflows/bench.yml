@@ -239,6 +239,9 @@ jobs:
             /No change in performance detected/ {
               current_status = "No Change"
             }
+            /Change within noise threshold/ {
+              current_status = "No Change (within noise)"
+            }
             # Handle the last benchmark at end of file
             END {
               if (current_bench != "" && current_change != "") {
