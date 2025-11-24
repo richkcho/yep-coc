@@ -44,10 +44,10 @@ impl<'a> YCQueue<'a> {
     ///
     /// # Examples
     /// ```
-    /// use yep_coc::queue_alloc_helpers::YCQueueOwnedData;
+    /// use yep_coc::queue_alloc_helpers::{CursorCacheLines, YCQueueOwnedData};
     /// use yep_coc::{YCQueue, YCQueueSharedMeta};
     ///
-    /// let mut owned = YCQueueOwnedData::new(4, 32);
+    /// let mut owned = YCQueueOwnedData::new_with_cursor_layout(4, 32, CursorCacheLines::Split);
     /// let shared = YCQueueSharedMeta::new(&owned.meta);
     /// let queue = YCQueue::new(shared, owned.data.as_mut_slice());
     /// assert!(queue.is_ok());
@@ -279,10 +279,10 @@ impl<'a> YCQueue<'a> {
     ///
     /// # Examples
     /// ```
-    /// use yep_coc::queue_alloc_helpers::YCQueueOwnedData;
+    /// use yep_coc::queue_alloc_helpers::{CursorCacheLines, YCQueueOwnedData};
     /// use yep_coc::{YCQueue, YCQueueSharedMeta};
     ///
-    /// let mut owned = YCQueueOwnedData::new(2, 16);
+    /// let mut owned = YCQueueOwnedData::new_with_cursor_layout(2, 16, CursorCacheLines::Split);
     /// let shared = YCQueueSharedMeta::new(&owned.meta);
     /// let mut queue = YCQueue::new(shared, owned.data.as_mut_slice()).unwrap();
     ///
@@ -341,10 +341,10 @@ impl<'a> YCQueue<'a> {
     ///
     /// # Examples
     /// ```
-    /// use yep_coc::queue_alloc_helpers::YCQueueOwnedData;
+    /// use yep_coc::queue_alloc_helpers::{CursorCacheLines, YCQueueOwnedData};
     /// use yep_coc::{YCQueue, YCQueueSharedMeta};
     ///
-    /// let mut owned = YCQueueOwnedData::new(4, 16);
+    /// let mut owned = YCQueueOwnedData::new_with_cursor_layout(4, 16, CursorCacheLines::Split);
     /// let shared = YCQueueSharedMeta::new(&owned.meta);
     /// let mut queue = YCQueue::new(shared, owned.data.as_mut_slice()).unwrap();
     ///
@@ -433,10 +433,10 @@ impl<'a> YCQueue<'a> {
     ///
     /// # Examples
     /// ```
-    /// use yep_coc::queue_alloc_helpers::YCQueueOwnedData;
+    /// use yep_coc::queue_alloc_helpers::{CursorCacheLines, YCQueueOwnedData};
     /// use yep_coc::{YCQueue, YCQueueSharedMeta};
     ///
-    /// let mut owned = YCQueueOwnedData::new(2, 16);
+    /// let mut owned = YCQueueOwnedData::new_with_cursor_layout(2, 16, CursorCacheLines::Split);
     /// let shared = YCQueueSharedMeta::new(&owned.meta);
     /// let mut queue = YCQueue::new(shared, owned.data.as_mut_slice()).unwrap();
     ///
@@ -467,10 +467,10 @@ impl<'a> YCQueue<'a> {
     ///
     /// # Examples
     /// ```
-    /// use yep_coc::queue_alloc_helpers::YCQueueOwnedData;
+    /// use yep_coc::queue_alloc_helpers::{CursorCacheLines, YCQueueOwnedData};
     /// use yep_coc::{YCQueue, YCQueueSharedMeta};
     ///
-    /// let mut owned = YCQueueOwnedData::new(2, 16);
+    /// let mut owned = YCQueueOwnedData::new_with_cursor_layout(2, 16, CursorCacheLines::Split);
     /// let shared = YCQueueSharedMeta::new(&owned.meta);
     /// let mut queue = YCQueue::new(shared, owned.data.as_mut_slice()).unwrap();
     ///
@@ -517,10 +517,10 @@ impl<'a> YCQueue<'a> {
     ///
     /// # Examples
     /// ```
-    /// use yep_coc::queue_alloc_helpers::YCQueueOwnedData;
+    /// use yep_coc::queue_alloc_helpers::{CursorCacheLines, YCQueueOwnedData};
     /// use yep_coc::{YCQueue, YCQueueSharedMeta};
     ///
-    /// let mut owned = YCQueueOwnedData::new(4, 16);
+    /// let mut owned = YCQueueOwnedData::new_with_cursor_layout(4, 16, CursorCacheLines::Split);
     /// let shared = YCQueueSharedMeta::new(&owned.meta);
     /// let mut queue = YCQueue::new(shared, owned.data.as_mut_slice()).unwrap();
     ///
@@ -583,10 +583,10 @@ impl<'a> YCQueue<'a> {
     ///
     /// # Examples
     /// ```
-    /// use yep_coc::queue_alloc_helpers::YCQueueOwnedData;
+    /// use yep_coc::queue_alloc_helpers::{CursorCacheLines, YCQueueOwnedData};
     /// use yep_coc::{YCQueue, YCQueueSharedMeta};
     ///
-    /// let mut owned = YCQueueOwnedData::new(4, 16);
+    /// let mut owned = YCQueueOwnedData::new_with_cursor_layout(4, 16, CursorCacheLines::Split);
     /// let shared = YCQueueSharedMeta::new(&owned.meta);
     /// let mut queue = YCQueue::new(shared, owned.data.as_mut_slice()).unwrap();
     ///
@@ -675,10 +675,10 @@ impl<'a> YCQueue<'a> {
     ///
     /// # Examples
     /// ```
-    /// use yep_coc::queue_alloc_helpers::YCQueueOwnedData;
+    /// use yep_coc::queue_alloc_helpers::{CursorCacheLines, YCQueueOwnedData};
     /// use yep_coc::{YCQueue, YCQueueSharedMeta};
     ///
-    /// let mut owned = YCQueueOwnedData::new(2, 16);
+    /// let mut owned = YCQueueOwnedData::new_with_cursor_layout(2, 16, CursorCacheLines::Split);
     /// let shared = YCQueueSharedMeta::new(&owned.meta);
     /// let mut queue = YCQueue::new(shared, owned.data.as_mut_slice()).unwrap();
     ///
@@ -709,10 +709,10 @@ impl<'a> YCQueue<'a> {
     ///
     /// # Examples
     /// ```
-    /// use yep_coc::queue_alloc_helpers::YCQueueOwnedData;
+    /// use yep_coc::queue_alloc_helpers::{CursorCacheLines, YCQueueOwnedData};
     /// use yep_coc::{YCQueue, YCQueueSharedMeta};
     ///
-    /// let mut owned = YCQueueOwnedData::new(2, 16);
+    /// let mut owned = YCQueueOwnedData::new_with_cursor_layout(2, 16, CursorCacheLines::Split);
     /// let shared = YCQueueSharedMeta::new(&owned.meta);
     /// let mut queue = YCQueue::new(shared, owned.data.as_mut_slice()).unwrap();
     ///
@@ -756,10 +756,10 @@ impl<'a> YCQueue<'a> {
     ///
     /// # Examples
     /// ```
-    /// use yep_coc::queue_alloc_helpers::YCQueueOwnedData;
+    /// use yep_coc::queue_alloc_helpers::{CursorCacheLines, YCQueueOwnedData};
     /// use yep_coc::{YCQueue, YCQueueSharedMeta};
     ///
-    /// let mut owned = YCQueueOwnedData::new(4, 16);
+    /// let mut owned = YCQueueOwnedData::new_with_cursor_layout(4, 16, CursorCacheLines::Split);
     /// let shared = YCQueueSharedMeta::new(&owned.meta);
     /// let mut queue = YCQueue::new(shared, owned.data.as_mut_slice()).unwrap();
     ///
@@ -810,14 +810,18 @@ impl<'a> YCQueue<'a> {
 mod tests {
     use super::*;
     use crate::YCQueueError;
-    use crate::queue_alloc_helpers::YCQueueOwnedData;
+    use crate::queue_alloc_helpers::{CursorCacheLines, YCQueueOwnedData};
 
     #[test]
     fn simple_produce_consume_test() {
         let slot_count: u16 = 4;
         let slot_size: u16 = 32;
 
-        let owned = YCQueueOwnedData::new(slot_count, slot_size);
+        let owned = YCQueueOwnedData::new_with_cursor_layout(
+            slot_count,
+            slot_size,
+            CursorCacheLines::Split,
+        );
         let mut queue = YCQueue::from_owned_data(&owned).unwrap();
 
         assert_eq!(
@@ -860,7 +864,11 @@ mod tests {
         let slot_count: u16 = 8;
         let slot_size: u16 = 64;
 
-        let owned = YCQueueOwnedData::new(slot_count, slot_size);
+        let owned = YCQueueOwnedData::new_with_cursor_layout(
+            slot_count,
+            slot_size,
+            CursorCacheLines::Split,
+        );
         let mut queue = YCQueue::from_owned_data(&owned).unwrap();
 
         assert_eq!(
@@ -922,7 +930,11 @@ mod tests {
         let slot_count: u16 = 4;
         let slot_size: u16 = 32;
 
-        let owned = YCQueueOwnedData::new(slot_count, slot_size);
+        let owned = YCQueueOwnedData::new_with_cursor_layout(
+            slot_count,
+            slot_size,
+            CursorCacheLines::Split,
+        );
         let mut queue = YCQueue::from_owned_data(&owned).unwrap();
 
         // Publish three slots so the consumer can hold one and block the wrap-around slot.
@@ -956,7 +968,11 @@ mod tests {
         let slot_count: u16 = 4;
         let slot_size: u16 = 32;
 
-        let owned = YCQueueOwnedData::new(slot_count, slot_size);
+        let owned = YCQueueOwnedData::new_with_cursor_layout(
+            slot_count,
+            slot_size,
+            CursorCacheLines::Split,
+        );
         let mut queue = YCQueue::from_owned_data(&owned).unwrap();
 
         let mut produce = queue.get_produce_slots(2, false).unwrap();
@@ -992,7 +1008,11 @@ mod tests {
         let slot_count: u16 = 4;
         let slot_size: u16 = 32;
 
-        let owned = YCQueueOwnedData::new(slot_count, slot_size);
+        let owned = YCQueueOwnedData::new_with_cursor_layout(
+            slot_count,
+            slot_size,
+            CursorCacheLines::Split,
+        );
         let mut queue = YCQueue::from_owned_data(&owned).unwrap();
 
         let initial_slots = queue.get_produce_slots(slot_count, false).unwrap();
@@ -1049,7 +1069,11 @@ mod tests {
         let batch_size: u16 = 67;
         let iterations = 5;
 
-        let owned = YCQueueOwnedData::new(slot_count, slot_size);
+        let owned = YCQueueOwnedData::new_with_cursor_layout(
+            slot_count,
+            slot_size,
+            CursorCacheLines::Split,
+        );
         let mut queue = YCQueue::from_owned_data(&owned).unwrap();
 
         assert_eq!(

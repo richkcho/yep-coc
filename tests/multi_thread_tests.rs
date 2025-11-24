@@ -4,7 +4,7 @@ mod multi_thread_tests {
     use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
 
-    use yep_coc::queue_alloc_helpers::{YCQueueOwnedData, YCQueueSharedData};
+    use yep_coc::queue_alloc_helpers::{CursorCacheLines, YCQueueOwnedData, YCQueueSharedData};
     use yep_coc::{YCQueue, YCQueueError};
 
     use test_support::utils::{copy_str_to_slice, str_from_u8};
@@ -20,7 +20,11 @@ mod multi_thread_tests {
         let num_iterations: u16 = 1000;
 
         // this is the "original" data - it owned the underlying allocations
-        let owned_data = YCQueueOwnedData::new(slot_count, slot_size);
+        let owned_data = YCQueueOwnedData::new_with_cursor_layout(
+            slot_count,
+            slot_size,
+            CursorCacheLines::Split,
+        );
 
         // we have to make a shared version to use in the other thread
         let consume_data = YCQueueSharedData::from_owned_data(&owned_data);
@@ -90,7 +94,11 @@ mod multi_thread_tests {
         let num_iterations: u16 = 1000;
         let batch_size: u16 = 5;
 
-        let owned_data = YCQueueOwnedData::new(slot_count, slot_size);
+        let owned_data = YCQueueOwnedData::new_with_cursor_layout(
+            slot_count,
+            slot_size,
+            CursorCacheLines::Split,
+        );
 
         let consume_data = YCQueueSharedData::from_owned_data(&owned_data);
         let produce_data = YCQueueSharedData::from_owned_data(&owned_data);
@@ -183,7 +191,11 @@ mod multi_thread_tests {
         let num_consumers: u16 = 4;
 
         // this is the "original" data - it owned the underlying allocations
-        let owned_data = YCQueueOwnedData::new(slot_count, slot_size);
+        let owned_data = YCQueueOwnedData::new_with_cursor_layout(
+            slot_count,
+            slot_size,
+            CursorCacheLines::Split,
+        );
 
         // create consumer queues
         let mut consumer_queues = Vec::with_capacity(num_consumers as usize);
@@ -326,7 +338,11 @@ mod multi_thread_tests {
         let num_consumers: u16 = 4;
         let batch_size: u16 = 5;
 
-        let owned_data = YCQueueOwnedData::new(slot_count, slot_size);
+        let owned_data = YCQueueOwnedData::new_with_cursor_layout(
+            slot_count,
+            slot_size,
+            CursorCacheLines::Split,
+        );
 
         let mut consumer_queues = Vec::with_capacity(num_consumers as usize);
         for _ in 0..num_consumers {
@@ -492,7 +508,11 @@ mod multi_thread_tests {
         let large_batch: u16 = 67;
         let reservations_per_thread: usize = 10;
 
-        let owned_data = YCQueueOwnedData::new(slot_count, slot_size);
+        let owned_data = YCQueueOwnedData::new_with_cursor_layout(
+            slot_count,
+            slot_size,
+            CursorCacheLines::Split,
+        );
 
         let producer_large_queue = {
             let shared = YCQueueSharedData::from_owned_data(&owned_data);

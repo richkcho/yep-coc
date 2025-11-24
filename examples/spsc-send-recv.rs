@@ -1,4 +1,4 @@
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use std::{
     sync::atomic::{AtomicBool, Ordering},
     sync::{Arc, Barrier, Mutex},
@@ -7,8 +7,8 @@ use std::{
 };
 use test_support::utils::{align_to_cache_line, backoff, copy_str_to_slice, str_from_u8};
 use yep_coc::{
-    YCQueue, YCQueueError, queue_alloc_helpers::YCQueueOwnedData,
-    queue_alloc_helpers::YCQueueSharedData,
+    YCQueue, YCQueueError,
+    queue_alloc_helpers::{CursorCacheLines, YCQueueOwnedData, YCQueueSharedData},
 };
 
 const PATTERN: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -44,6 +44,30 @@ struct Args {
     /// Timeout in seconds for sender/receiver loops
     #[arg(short = 't', long, default_value = "10")]
     timeout_secs: u64,
+
+    /// Cursor placement strategy: split cache lines or unified
+    #[arg(
+        long,
+        value_enum,
+        default_value_t = CursorLayout::Split,
+        value_name = "LAYOUT"
+    )]
+    cursor_layout: CursorLayout,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum CursorLayout {
+    Split,
+    Unified,
+}
+
+impl From<CursorLayout> for CursorCacheLines {
+    fn from(layout: CursorLayout) -> Self {
+        match layout {
+            CursorLayout::Split => CursorCacheLines::Split,
+            CursorLayout::Unified => CursorCacheLines::Single,
+        }
+    }
 }
 
 fn main() {
@@ -81,7 +105,11 @@ fn main() {
     }
 
     // Create the queue with shared data regions
-    let owned_data = YCQueueOwnedData::new(args.queue_depth, slot_size);
+    let owned_data = YCQueueOwnedData::new_with_cursor_layout(
+        args.queue_depth,
+        slot_size,
+        args.cursor_layout.into(),
+    );
     let consumer_data = YCQueueSharedData::from_owned_data(&owned_data);
     let producer_data = YCQueueSharedData::from_owned_data(&owned_data);
 
