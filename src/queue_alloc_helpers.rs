@@ -12,6 +12,14 @@ use yep_cache_line_size::{CacheLevel, CacheType, get_cache_line_size};
 
 const DEFAULT_CACHE_LINE_SIZE: usize = 64;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CursorCacheLines {
+    /// Place producer/consumer cursors in the same cache line.
+    Single,
+    /// Place producer/consumer cursors in separate cache lines.
+    Split,
+}
+
 fn cache_line_size() -> usize {
     get_cache_line_size(CacheLevel::L1, CacheType::Data)
         .ok()
@@ -66,6 +74,100 @@ impl std::ops::DerefMut for CachePaddedAtomicU64 {
     }
 }
 
+#[derive(Debug)]
+enum CursorStorage {
+    Split {
+        producer: CachePaddedAtomicU64,
+        consumer: CachePaddedAtomicU64,
+    },
+    SingleLine {
+        storage: Box<[AtomicU64]>,
+        producer_index: usize,
+        consumer_index: usize,
+    },
+}
+
+#[derive(Debug)]
+struct OwnedCursors {
+    layout: CursorCacheLines,
+    storage: CursorStorage,
+}
+
+impl OwnedCursors {
+    fn new(initial_value: u64, layout: CursorCacheLines) -> Self {
+        match layout {
+            CursorCacheLines::Split => OwnedCursors {
+                layout,
+                storage: CursorStorage::Split {
+                    producer: CachePaddedAtomicU64::new(initial_value),
+                    consumer: CachePaddedAtomicU64::new(initial_value),
+                },
+            },
+            CursorCacheLines::Single => {
+                let line_size = cache_line_size();
+                let atoms_per_line = (line_size / size_of::<u64>()).max(1);
+                let mut storage = Vec::with_capacity(atoms_per_line + 1);
+                for _ in 0..storage.capacity() {
+                    storage.push(AtomicU64::new(initial_value));
+                }
+                let storage = storage.into_boxed_slice();
+                let search_len = storage.len().saturating_sub(1);
+
+                let producer_index = (0..search_len)
+                    .find(|i| {
+                        let base = unsafe { storage.as_ptr().add(*i) } as usize;
+                        let consumer = unsafe { storage.as_ptr().add(*i + 1) } as usize;
+                        base.is_multiple_of(line_size) && base / line_size == consumer / line_size
+                    })
+                    .unwrap_or(0);
+                let consumer_index = producer_index + 1;
+
+                debug_assert!(consumer_index < storage.len());
+                debug_assert!({
+                    let base = unsafe { storage.as_ptr().add(producer_index) } as usize;
+                    let consumer = unsafe { storage.as_ptr().add(consumer_index) } as usize;
+                    base.is_multiple_of(line_size) && base / line_size == consumer / line_size
+                });
+
+                OwnedCursors {
+                    layout,
+                    storage: CursorStorage::SingleLine {
+                        storage,
+                        producer_index,
+                        consumer_index,
+                    },
+                }
+            }
+        }
+    }
+
+    fn producer(&self) -> &AtomicU64 {
+        match &self.storage {
+            CursorStorage::Split { producer, .. } => producer,
+            CursorStorage::SingleLine {
+                storage,
+                producer_index,
+                ..
+            } => &storage[*producer_index],
+        }
+    }
+
+    fn consumer(&self) -> &AtomicU64 {
+        match &self.storage {
+            CursorStorage::Split { consumer, .. } => consumer,
+            CursorStorage::SingleLine {
+                storage,
+                consumer_index,
+                ..
+            } => &storage[*consumer_index],
+        }
+    }
+
+    fn layout(&self) -> CursorCacheLines {
+        self.layout
+    }
+}
+
 fn align_to(ptr: *mut u8, alignment: usize) -> *mut u8 {
     let addr = ptr as usize;
     let aligned = (addr + alignment - 1) & !(alignment - 1);
@@ -76,17 +178,27 @@ fn align_to(ptr: *mut u8, alignment: usize) -> *mut u8 {
 pub struct YCQueueOwnedMeta {
     pub slot_count: AtomicU16,
     pub slot_size: AtomicU16,
-    pub producer_meta: CachePaddedAtomicU64,
-    pub consumer_meta: CachePaddedAtomicU64,
+    cursors: OwnedCursors,
     pub ownership: Vec<AtomicU64>,
 }
 
 impl YCQueueOwnedMeta {
     pub fn new(slot_count_u16: u16, slot_size_u16: u16) -> YCQueueOwnedMeta {
+        YCQueueOwnedMeta::new_with_cursor_layout(
+            slot_count_u16,
+            slot_size_u16,
+            CursorCacheLines::Split,
+        )
+    }
+
+    pub fn new_with_cursor_layout(
+        slot_count_u16: u16,
+        slot_size_u16: u16,
+        cursor_layout: CursorCacheLines,
+    ) -> YCQueueOwnedMeta {
         let slot_count = AtomicU16::new(slot_count_u16);
         let slot_size = AtomicU16::new(slot_size_u16);
-        let producer_meta = CachePaddedAtomicU64::new(0);
-        let consumer_meta = CachePaddedAtomicU64::new(0);
+        let cursors = OwnedCursors::new(0, cursor_layout);
         let mut ownership =
             Vec::<AtomicU64>::with_capacity((slot_count_u16 as usize).div_ceil(u64::BITS as usize));
 
@@ -97,10 +209,21 @@ impl YCQueueOwnedMeta {
         YCQueueOwnedMeta {
             slot_count,
             slot_size,
-            producer_meta,
-            consumer_meta,
+            cursors,
             ownership,
         }
+    }
+
+    pub fn producer_cursor(&self) -> &AtomicU64 {
+        self.cursors.producer()
+    }
+
+    pub fn consumer_cursor(&self) -> &AtomicU64 {
+        self.cursors.consumer()
+    }
+
+    pub fn cursor_layout(&self) -> CursorCacheLines {
+        self.cursors.layout()
     }
 }
 
@@ -109,13 +232,20 @@ impl<'a> YCQueueSharedMeta<'a> {
         YCQueueSharedMeta {
             slot_count: &meta_ref.slot_count,
             slot_size: &meta_ref.slot_size,
-            producer_cursor: &meta_ref.producer_meta,
-            consumer_cursor: &meta_ref.consumer_meta,
+            producer_cursor: meta_ref.producer_cursor(),
+            consumer_cursor: meta_ref.consumer_cursor(),
             ownership: &meta_ref.ownership,
         }
     }
 
     pub fn new_from_mut_ptr(ptr: *mut u8) -> Result<YCQueueSharedMeta<'a>, YCQueueError> {
+        YCQueueSharedMeta::new_from_mut_ptr_with_layout(ptr, CursorCacheLines::Split)
+    }
+
+    pub fn new_from_mut_ptr_with_layout(
+        ptr: *mut u8,
+        cursor_layout: CursorCacheLines,
+    ) -> Result<YCQueueSharedMeta<'a>, YCQueueError> {
         if ptr.is_null() {
             return Err(YCQueueError::InvalidArgs);
         }
@@ -125,17 +255,33 @@ impl<'a> YCQueueSharedMeta<'a> {
         let mut byte_cursor = unsafe { slot_size_ptr.add(1) as *mut u8 };
 
         let line_size = cache_line_size();
-        let producer_meta_ptr = align_to(byte_cursor, line_size) as *mut CachePaddedAtomicU64;
-        let consumer_meta_ptr = unsafe { producer_meta_ptr.add(1) };
-        byte_cursor = unsafe { (consumer_meta_ptr.add(1)) as *mut u8 };
+        let (producer_meta, consumer_meta) = match cursor_layout {
+            CursorCacheLines::Split => {
+                let producer_meta_ptr =
+                    align_to(byte_cursor, line_size) as *mut CachePaddedAtomicU64;
+                let consumer_meta_ptr = unsafe { producer_meta_ptr.add(1) };
+                byte_cursor = unsafe { consumer_meta_ptr.add(1) as *mut u8 };
+
+                let producer_meta: &AtomicU64 = unsafe { &*producer_meta_ptr };
+                let consumer_meta: &AtomicU64 = unsafe { &*consumer_meta_ptr };
+                (producer_meta, consumer_meta)
+            }
+            CursorCacheLines::Single => {
+                let producer_meta_ptr = align_to(byte_cursor, line_size) as *mut AtomicU64;
+                let consumer_meta_ptr = unsafe { producer_meta_ptr.add(1) };
+                byte_cursor = unsafe { consumer_meta_ptr.add(1) as *mut u8 };
+
+                let producer_meta: &AtomicU64 = unsafe { &*producer_meta_ptr };
+                let consumer_meta: &AtomicU64 = unsafe { &*consumer_meta_ptr };
+                (producer_meta, consumer_meta)
+            }
+        };
 
         let ownership_ptr =
             align_to(byte_cursor, std::mem::align_of::<AtomicU64>()) as *mut AtomicU64;
 
         let slot_count = unsafe { &*slot_count_ptr };
         let slot_size = unsafe { &*slot_size_ptr };
-        let producer_meta: &AtomicU64 = unsafe { &*producer_meta_ptr };
-        let consumer_meta: &AtomicU64 = unsafe { &*consumer_meta_ptr };
 
         let slot_count_u16 = slot_count.load(std::sync::atomic::Ordering::Acquire);
         let ownership_count = (slot_count_u16 as usize).div_ceil(u64::BITS as usize);
@@ -163,7 +309,20 @@ pub struct YCQueueOwnedData {
 
 impl YCQueueOwnedData {
     pub fn new(slot_count_u16: u16, slot_size_u16: u16) -> YCQueueOwnedData {
-        let meta = YCQueueOwnedMeta::new(slot_count_u16, slot_size_u16);
+        YCQueueOwnedData::new_with_cursor_layout(
+            slot_count_u16,
+            slot_size_u16,
+            CursorCacheLines::Split,
+        )
+    }
+
+    pub fn new_with_cursor_layout(
+        slot_count_u16: u16,
+        slot_size_u16: u16,
+        cursor_layout: CursorCacheLines,
+    ) -> YCQueueOwnedData {
+        let meta =
+            YCQueueOwnedMeta::new_with_cursor_layout(slot_count_u16, slot_size_u16, cursor_layout);
         let mut data = vec![0_u8; slot_count_u16 as usize * slot_size_u16 as usize];
         let raw_ptr = data.as_mut_ptr();
 
@@ -223,7 +382,11 @@ pub struct YCFutexQueueOwnedData {
 #[cfg(feature = "futex")]
 impl YCFutexQueueOwnedData {
     pub fn new(slot_count_u16: u16, slot_size_u16: u16) -> YCFutexQueueOwnedData {
-        let data = YCQueueOwnedData::new(slot_count_u16, slot_size_u16);
+        let data = YCQueueOwnedData::new_with_cursor_layout(
+            slot_count_u16,
+            slot_size_u16,
+            CursorCacheLines::Split,
+        );
         let count = AtomicI32::new(0);
 
         YCFutexQueueOwnedData { data, count }
@@ -288,21 +451,40 @@ mod queue_alloc_helpers_tests {
     }
 
     #[test]
-    fn test_shared_meta() {
+    fn test_shared_meta_split_layout() {
+        shared_meta_round_trip(CursorCacheLines::Split);
+    }
+
+    #[test]
+    fn test_shared_meta_single_layout() {
+        shared_meta_round_trip(CursorCacheLines::Single);
+    }
+
+    fn shared_meta_round_trip(cursor_layout: CursorCacheLines) {
         let slot_count: u16 = 128;
         let slot_size: u16 = 64;
-        let owned_meta = YCQueueOwnedMeta::new(slot_count, slot_size);
+        let owned_meta =
+            YCQueueOwnedMeta::new_with_cursor_layout(slot_count, slot_size, cursor_layout);
 
         let shared_meta: YCQueueSharedMeta<'_> = YCQueueSharedMeta::new(&owned_meta);
 
+        assert_eq!(owned_meta.cursor_layout(), cursor_layout);
+
         assert_eq!(
-            owned_meta.producer_meta.load(Ordering::Acquire),
+            owned_meta.producer_cursor().load(Ordering::Acquire),
             shared_meta.producer_cursor.load(Ordering::Acquire)
         );
         assert_eq!(
-            owned_meta.consumer_meta.load(Ordering::Acquire),
+            owned_meta.consumer_cursor().load(Ordering::Acquire),
             shared_meta.consumer_cursor.load(Ordering::Acquire)
         );
+
+        if matches!(cursor_layout, CursorCacheLines::Single) {
+            let line_size = cache_line_size();
+            let producer_ptr = owned_meta.producer_cursor() as *const AtomicU64 as usize;
+            let consumer_ptr = owned_meta.consumer_cursor() as *const AtomicU64 as usize;
+            assert_eq!(producer_ptr / line_size, consumer_ptr / line_size);
+        }
 
         // validate initial memory
         let num_atomics = owned_meta.ownership.len();
@@ -315,13 +497,15 @@ mod queue_alloc_helpers_tests {
 
         // write to owned and see it reflect in shared
         let new_value: u64 = 12345;
-        owned_meta.producer_meta.store(new_value, Ordering::Release);
+        owned_meta
+            .producer_cursor()
+            .store(new_value, Ordering::Release);
         assert_eq!(
             shared_meta.producer_cursor.load(Ordering::Acquire),
             new_value
         );
         owned_meta
-            .consumer_meta
+            .consumer_cursor()
             .store(new_value + 1, Ordering::Release);
         assert_eq!(
             shared_meta.consumer_cursor.load(Ordering::Acquire),
@@ -340,14 +524,14 @@ mod queue_alloc_helpers_tests {
             .producer_cursor
             .store(new_new_value, Ordering::Release);
         assert_eq!(
-            owned_meta.producer_meta.load(Ordering::Acquire),
+            owned_meta.producer_cursor().load(Ordering::Acquire),
             new_new_value
         );
         shared_meta
             .consumer_cursor
             .store(new_new_value + 1, Ordering::Release);
         assert_eq!(
-            owned_meta.consumer_meta.load(Ordering::Acquire),
+            owned_meta.consumer_cursor().load(Ordering::Acquire),
             new_new_value + 1
         );
         for i in 0..num_atomics {
@@ -365,7 +549,11 @@ mod queue_alloc_helpers_tests {
     fn test_shared_data() {
         let slot_count: u16 = 4;
         let slot_size: u16 = 8;
-        let mut owned_data = YCQueueOwnedData::new(slot_count, slot_size);
+        let mut owned_data = YCQueueOwnedData::new_with_cursor_layout(
+            slot_count,
+            slot_size,
+            CursorCacheLines::Split,
+        );
 
         for (idx, byte) in owned_data.data.iter_mut().enumerate() {
             *byte = idx as u8;
