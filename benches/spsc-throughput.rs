@@ -38,7 +38,7 @@ use std::time::{Duration, Instant};
 use test_support::utils::{backoff, cache_line_size};
 use yep_coc::{
     YCQueue, YCQueueError,
-    queue_alloc_helpers::{YCQueueOwnedData, YCQueueSharedData},
+    queue_alloc_helpers::{CursorCacheLines, YCQueueOwnedData, YCQueueSharedData},
 };
 
 /// Wrapper to make queue_alloc_helpers::YCQueueOwnedData Send+Sync for benchmarking.
@@ -162,9 +162,10 @@ fn run_spsc_sample(
     let items_consumed_consumer = Arc::clone(&items_consumed);
 
     // Allocate queue data BEFORE spawning threads
-    let owned_data = Arc::new(SendSyncOwnedData(YCQueueOwnedData::new(
+    let owned_data = Arc::new(SendSyncOwnedData(YCQueueOwnedData::new_with_cursor_layout(
         params.capacity,
         params.payload_size,
+        CursorCacheLines::Split,
     )));
     let owned_data_producer = Arc::clone(&owned_data);
     let owned_data_consumer = Arc::clone(&owned_data);
