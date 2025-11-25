@@ -24,6 +24,10 @@ struct Args {
     #[arg(short = 'd', long, default_value = "64")]
     queue_depth: u16,
 
+    /// Number of messages to send/receive per queue operation
+    #[arg(short = 'b', long, default_value = "1")]
+    batch_size: u16,
+
     /// Maximum number of in-flight messages
     #[arg(short = 'f', long, default_value = "32")]
     in_flight_count: u16,
@@ -33,15 +37,15 @@ struct Args {
     msg_check_len: u16,
 
     /// Total number of messages to send
-    #[arg(short = 'n', long, default_value = "100")]
+    #[arg(short = 'n', long, default_value = "10000")]
     msg_count: u32,
 
     /// Number of producer threads
-    #[arg(short = 'p', long, default_value = "1")]
+    #[arg(short = 'p', long, default_value = "2")]
     producer_threads: u16,
 
     /// Number of consumer threads
-    #[arg(short = 'c', long, default_value = "1")]
+    #[arg(short = 'c', long, default_value = "2")]
     consumer_threads: u16,
 
     /// Enable verbose logging
@@ -99,6 +103,7 @@ fn main() {
     println!("Starting multi-send-recv test with:");
     println!("  Queue depth: {}", args.queue_depth);
     println!("  Max in-flight messages: {}", args.in_flight_count);
+    println!("  Batch size: {}", args.batch_size);
     println!("  Message length: {msg_len}");
     println!("  Queue slot size: {slot_size} bytes");
     println!("  Total messages: {}", args.msg_count);
@@ -115,6 +120,14 @@ fn main() {
 
     if args.consumer_threads == 0 {
         panic!("At least one consumer thread is required");
+    }
+
+    if args.batch_size == 0 {
+        panic!("batch_size must be greater than zero");
+    }
+
+    if args.batch_size > args.queue_depth {
+        panic!("batch_size cannot exceed queue_depth");
     }
 
     let owned_data = YCQueueOwnedData::new(args.queue_depth, slot_size);
@@ -162,40 +175,57 @@ fn main() {
             let verbose = args.verbose;
             let in_flight_limit = args.in_flight_count;
             let msg_check_len = args.msg_check_len;
+            let batch_size = args.batch_size;
             let earliest_start = Arc::clone(&earliest_producer_start);
 
             s.spawn(move || {
                 let mut local_sent = 0_u32;
+                let mut next_msg_index = range_start;
                 let thread_start = std::time::Instant::now();
 
-                for msg_index in range_start..range_end {
+                while next_msg_index < range_end {
+                    let in_flight = queue.in_flight_count();
+                    if in_flight >= in_flight_limit {
+                        thread::yield_now();
+                        continue;
+                    }
+
                     loop {
-                        if queue.in_flight_count() >= in_flight_limit {
+                        let remaining = range_end - next_msg_index;
+                        let available_in_flight = in_flight_limit - queue.in_flight_count();
+                        let request = batch_size.min(available_in_flight).min(remaining as u16);
+
+                        if request == 0 {
                             thread::yield_now();
                             continue;
                         }
 
-                        match queue.get_produce_slot() {
-                            Ok(slot) => {
-                                if msg_check_len > 0 {
-                                    slot.data[..INDEX_PREFIX_LEN]
-                                        .copy_from_slice(&msg_index.to_le_bytes());
+                        match queue.get_produce_slots(request, true) {
+                            Ok(mut slots) => {
+                                for slot in slots.iter_mut() {
+                                    if msg_check_len > 0 {
+                                        slot.data[..INDEX_PREFIX_LEN]
+                                            .copy_from_slice(&next_msg_index.to_le_bytes());
 
-                                    for i in 0..validation_len.saturating_sub(INDEX_PREFIX_LEN) {
-                                        let b = PATTERN.as_bytes()
-                                            [(msg_index as usize + i) % PATTERN.len()];
-                                        slot.data[INDEX_PREFIX_LEN + i] = b;
+                                        for i in 0..validation_len.saturating_sub(INDEX_PREFIX_LEN)
+                                        {
+                                            let b = PATTERN.as_bytes()
+                                                [(next_msg_index as usize + i) % PATTERN.len()];
+                                            slot.data[INDEX_PREFIX_LEN + i] = b;
+                                        }
+                                    } else {
+                                        copy_str_to_slice(default_message, slot.data);
                                     }
-                                } else {
-                                    copy_str_to_slice(default_message, slot.data);
+
+                                    if verbose {
+                                        println!("Producer thread sent message {next_msg_index}");
+                                    }
+
+                                    next_msg_index += 1;
                                 }
 
-                                if verbose {
-                                    println!("Producer thread sent message {msg_index}");
-                                }
-
-                                queue.mark_slot_produced(slot).unwrap();
-                                local_sent += 1;
+                                local_sent += slots.len() as u32;
+                                queue.mark_slots_produced(slots).unwrap();
                                 break;
                             }
                             Err(YCQueueError::OutOfSpace) | Err(YCQueueError::SlotNotReady) => {
@@ -248,28 +278,33 @@ fn main() {
                         break;
                     }
 
-                    match queue.get_consume_slot() {
-                        Ok(slot) => {
-                            let msg_index = consumed_count.fetch_add(1, Ordering::Relaxed);
+                    match queue.get_consume_slots(args.batch_size, true) {
+                        Ok(slots) => {
+                            let processed = slots.len() as u32;
+                            for slot in &slots {
+                                let msg_index = consumed_count.fetch_add(1, Ordering::Relaxed);
 
-                            if msg_index >= msg_count {
-                                panic!("Received more messages than expected");
+                                if msg_index >= msg_count {
+                                    panic!("Received more messages than expected");
+                                }
+
+                                if msg_check_len > 0 {
+                                    local_validations.push(slot.data[..validation_len].to_vec());
+                                    if verbose {
+                                        println!("Consumer thread received message {msg_index}");
+                                    }
+                                } else {
+                                    let msg = str_from_u8(slot.data);
+                                    if verbose {
+                                        println!(
+                                            "Consumer thread received message {msg_index}: {msg}"
+                                        );
+                                    }
+                                }
                             }
 
-                            if msg_check_len > 0 {
-                                local_validations.push(slot.data[..validation_len].to_vec());
-                                if verbose {
-                                    println!("Consumer thread received message {msg_index}");
-                                }
-                            } else {
-                                let msg = str_from_u8(slot.data);
-                                if verbose {
-                                    println!("Consumer thread received message {msg_index}: {msg}");
-                                }
-                            }
-
-                            queue.mark_slot_consumed(slot).unwrap();
-                            local_received += 1;
+                            queue.mark_slots_consumed(slots).unwrap();
+                            local_received += processed;
                         }
                         Err(YCQueueError::EmptyQueue) | Err(YCQueueError::SlotNotReady) => {
                             thread::yield_now();

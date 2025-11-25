@@ -19,6 +19,10 @@ struct Args {
     #[arg(short = 'd', long, default_value = "64")]
     queue_depth: u16,
 
+    /// Number of messages to send/receive per queue operation
+    #[arg(short = 'b', long, default_value = "1")]
+    batch_size: u16,
+
     /// Maximum number of in-flight messages
     #[arg(short = 'f', long, default_value = "32")]
     in_flight_count: u16,
@@ -28,7 +32,7 @@ struct Args {
     msg_check_len: u16,
 
     /// Total number of messages to send
-    #[arg(short = 'n', long, default_value = "100")]
+    #[arg(short = 'n', long, default_value = "10000")]
     msg_count: u32,
 
     /// Enable verbose logging
@@ -51,6 +55,7 @@ fn main() {
 
     println!("Starting simple send test with:");
     println!("  Queue depth: {}", args.queue_depth);
+    println!("  Batch size: {}", args.batch_size);
     println!("  Max in-flight messages: {}", args.in_flight_count);
     println!("  Message length: {msg_len}");
     println!("  Queue slot size: {slot_size} bytes");
@@ -63,6 +68,14 @@ fn main() {
 
     if args.in_flight_count == 0 || args.queue_depth == 0 {
         panic!("in_flight_count and queue_depth must be greater than zero");
+    }
+
+    if args.batch_size == 0 {
+        panic!("batch_size must be greater than zero");
+    }
+
+    if args.batch_size > args.queue_depth {
+        panic!("batch_size cannot exceed queue_depth");
     }
 
     // Create the queue with shared data regions
@@ -95,28 +108,30 @@ fn main() {
                         timeout, messages_received
                     );
                 }
-                match consumer_queue.get_consume_slot() {
-                    Ok(consume_slot) => {
-                        // Convert received data to string and check contents
-                        let msg = str_from_u8(consume_slot.data);
+                match consumer_queue.get_consume_slots(args.batch_size, true) {
+                    Ok(slots) => {
+                        for (offset, slot) in slots.iter().enumerate() {
+                            let msg_index = messages_received + offset as u32;
+                            let msg = str_from_u8(slot.data);
 
-                        if args.verbose {
-                            println!("Received: {msg}");
-                        }
+                            if args.verbose {
+                                println!("Received: {msg}");
+                            }
 
-                        if args.msg_check_len > 0 {
-                            for i in 0..args.msg_check_len as usize {
-                                let expected_char = PATTERN.as_bytes()
-                                    [(messages_received as usize + i) % PATTERN.len()];
-                                let received_char = msg.as_bytes()[i];
-                                if expected_char != received_char {
-                                    panic!("Message content mismatch at message {messages_received}, byte {i}:\nExpected: '{expected_char}'\nReceived: '{received_char}'");
+                            if args.msg_check_len > 0 {
+                                for i in 0..args.msg_check_len as usize {
+                                    let expected_char = PATTERN.as_bytes()
+                                        [(msg_index as usize + i) % PATTERN.len()];
+                                    let received_char = msg.as_bytes()[i];
+                                    if expected_char != received_char {
+                                        panic!("Message content mismatch at message {msg_index}, byte {i}:\nExpected: '{expected_char}'\nReceived: '{received_char}'");
+                                    }
                                 }
                             }
                         }
 
-                        consumer_queue.mark_slot_consumed(consume_slot).unwrap();
-                        messages_received += 1;
+                        messages_received += slots.len() as u32;
+                        consumer_queue.mark_slots_consumed(slots).unwrap();
                     }
                     Err(YCQueueError::EmptyQueue) | Err(YCQueueError::SlotNotReady) => {
                         thread::yield_now(); // Queue is empty, yield CPU
@@ -140,31 +155,41 @@ fn main() {
                         timeout, messages_sent
                     );
                 }
-                if producer_queue.in_flight_count() >= args.in_flight_count {
+                let in_flight = producer_queue.in_flight_count();
+                if in_flight >= args.in_flight_count {
                     thread::yield_now(); // Too many in-flight messages, yield CPU
                     continue;
                 }
 
-                match producer_queue.get_produce_slot() {
-                    Ok(produce_slot) => {
-                        // Create and send message
-                        if args.msg_check_len > 0 {
-                            for i in 0..args.msg_check_len as usize {
-                                let b = PATTERN.as_bytes()
-                                    [(messages_sent as usize + i) % PATTERN.len()];
-                                produce_slot.data[i] = b;
+                let available_in_flight = args.in_flight_count - in_flight;
+                let request = args.batch_size.min(available_in_flight);
+
+                if request == 0 {
+                    thread::yield_now();
+                    continue;
+                }
+
+                match producer_queue.get_produce_slots(request, true) {
+                    Ok(mut slots) => {
+                        for (offset, slot) in slots.iter_mut().enumerate() {
+                            let msg_index = messages_sent + offset as u32;
+                            if args.msg_check_len > 0 {
+                                for i in 0..args.msg_check_len as usize {
+                                    let b = PATTERN.as_bytes()
+                                        [(msg_index as usize + i) % PATTERN.len()];
+                                    slot.data[i] = b;
+                                }
+                            } else {
+                                copy_str_to_slice(default_message, slot.data);
                             }
-                        } else {
-                            copy_str_to_slice(default_message, produce_slot.data);
+
+                            if args.verbose {
+                                println!("Sent: {}", str_from_u8(slot.data));
+                            }
                         }
 
-                        if args.verbose {
-                            println!("Sent: {}", str_from_u8(produce_slot.data));
-                        }
-
-                        producer_queue.mark_slot_produced(produce_slot).unwrap();
-
-                        messages_sent += 1;
+                        messages_sent += slots.len() as u32;
+                        producer_queue.mark_slots_produced(slots).unwrap();
                     }
                     Err(YCQueueError::OutOfSpace) | Err(YCQueueError::SlotNotReady) => {
                         thread::yield_now(); // Queue is full, yield CPU
