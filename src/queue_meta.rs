@@ -48,8 +48,8 @@ impl YCQueueU64Meta {
     }
 
     /// Compute the consumer index from producer index and in-flight count.
-    /// This is computed as: consume_idx = (produce_idx - in_flight) % slot_count
-    /// with proper handling of wrapping arithmetic.
+    /// This is computed as: consume_idx = (produce_idx + slot_count - in_flight) % slot_count
+    /// which handles wrapping arithmetic correctly when produce_idx < in_flight.
     pub(crate) fn consume_idx(&self) -> u16 {
         let produce_idx = self.produce_idx as u32;
         let in_flight = self.in_flight as u32;
@@ -96,7 +96,7 @@ mod tests {
         // Test wrapping case: produce_idx < in_flight
         meta.produce_idx = 2;
         meta.in_flight = 5;
-        // consume_idx should be (10 - (5 - 2)) = 10 - 3 = 7
+        // consume_idx should be (2 + 10 - 5) % 10 = 7
         assert_eq!(meta.consume_idx(), 7);
     }
 }
