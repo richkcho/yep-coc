@@ -79,7 +79,7 @@ mod tests {
         meta.produce_idx = test_produce_idx;
         meta.in_flight = test_in_flight;
 
-        // consume_idx should be computed as (5 - 3) = 2
+        // consume_idx should be (5 + 10 - 3) % 10 = 2
         assert_eq!(meta.consume_idx(), 2);
 
         // create new meta as copy from u64
