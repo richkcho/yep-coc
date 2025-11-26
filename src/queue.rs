@@ -254,7 +254,10 @@ impl<'a> YCQueue<'a> {
 
     /// Snapshot the packed metadata that tracks indices and in-flight count.
     fn get_u64_meta(&self) -> YCQueueU64Meta {
-        YCQueueU64Meta::from_u64(self.shared_metadata.u64_meta.load(Ordering::Acquire))
+        YCQueueU64Meta::from_u64(
+            self.shared_metadata.u64_meta.load(Ordering::Acquire),
+            self.slot_count,
+        )
     }
 
     /// Returns the number of slots that have been produced (or are being produced into) but not yet consumed.
@@ -296,7 +299,7 @@ impl<'a> YCQueue<'a> {
     /// The slot index measured modulo the queue capacity.
     #[inline]
     pub fn consume_idx(&self) -> u16 {
-        self.get_u64_meta().consume_idx
+        self.get_u64_meta().consume_idx()
     }
 
     /// Returns the total number of slots managed by this queue.
@@ -351,7 +354,7 @@ impl<'a> YCQueue<'a> {
 
         let start_index = loop {
             let value = self.shared_metadata.u64_meta.load(Ordering::Acquire);
-            let mut meta = YCQueueU64Meta::from_u64(value);
+            let mut meta = YCQueueU64Meta::from_u64(value, self.slot_count);
 
             if meta.in_flight as u32 + num_slots as u32 > self.slot_count as u32 {
                 return Err(YCQueueError::OutOfSpace);
@@ -602,14 +605,14 @@ impl<'a> YCQueue<'a> {
 
         let start_index = loop {
             let value = self.shared_metadata.u64_meta.load(Ordering::Acquire);
-            let mut meta = YCQueueU64Meta::from_u64(value);
+            let mut meta = YCQueueU64Meta::from_u64(value, self.slot_count);
 
             if meta.in_flight < num_slots {
                 return Err(YCQueueError::EmptyQueue);
             }
 
-            let available_slots =
-                self.check_owner(meta.consume_idx, num_slots, YCQueueOwner::Consumer);
+            let consume_idx = meta.consume_idx();
+            let available_slots = self.check_owner(consume_idx, num_slots, YCQueueOwner::Consumer);
             if (!best_effort && available_slots != num_slots)
                 || (best_effort && available_slots == 0)
             {
@@ -620,12 +623,7 @@ impl<'a> YCQueue<'a> {
             debug_assert!(available_slots <= num_slots);
             num_slots = available_slots;
 
-            let consume_idx = meta.consume_idx;
-            let mut next_idx = consume_idx as u32 + num_slots as u32;
-            if next_idx >= self.slot_count as u32 {
-                next_idx -= self.slot_count as u32;
-            }
-            meta.consume_idx = next_idx as u16;
+            // Only need to update in_flight; consume_idx is computed from produce_idx and in_flight
             meta.in_flight -= num_slots;
 
             let new_value = meta.to_u64();

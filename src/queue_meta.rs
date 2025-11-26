@@ -21,35 +21,45 @@ pub struct YCQueueSharedMeta<'a> {
 pub(crate) struct YCQueueU64Meta {
     /// where to currently produce into
     pub(crate) produce_idx: u16,
-    /// where to consume from
-    pub(crate) consume_idx: u16,
     // how many in-flight messages there are
     pub(crate) in_flight: u16,
+    // slot_count is needed to compute consume_idx
+    slot_count: u16,
 }
 
 impl YCQueueU64Meta {
-    pub(crate) fn from_u64(value: u64) -> YCQueueU64Meta {
+    pub(crate) fn from_u64(value: u64, slot_count: u16) -> YCQueueU64Meta {
         let produce_idx = value as u16;
-        let consume_idx = (value >> u16::BITS) as u16;
-        let in_flight = (value >> (2 * u16::BITS)) as u16;
+        let in_flight = (value >> u16::BITS) as u16;
 
         YCQueueU64Meta {
             produce_idx,
-            consume_idx,
             in_flight,
+            slot_count,
         }
     }
 
     pub(crate) fn to_u64(self) -> u64 {
-        let mut value: u64 = self.consume_idx as u64;
-        value <<= u16::BITS;
-        value |= self.in_flight as u64;
-        value <<= u16::BITS;
-        value |= self.consume_idx as u64;
+        let mut value: u64 = self.in_flight as u64;
         value <<= u16::BITS;
         value |= self.produce_idx as u64;
 
         value
+    }
+
+    /// Compute the consumer index from producer index and in-flight count.
+    /// This is computed as: consume_idx = (produce_idx - in_flight) % slot_count
+    /// with proper handling of wrapping arithmetic.
+    pub(crate) fn consume_idx(&self) -> u16 {
+        let produce_idx = self.produce_idx as u32;
+        let in_flight = self.in_flight as u32;
+        let slot_count = self.slot_count as u32;
+
+        if produce_idx >= in_flight {
+            (produce_idx - in_flight) as u16
+        } else {
+            (slot_count - (in_flight - produce_idx)) as u16
+        }
     }
 }
 
@@ -59,30 +69,38 @@ mod tests {
 
     #[test]
     fn test_u64_meta() {
-        let mut meta: YCQueueU64Meta = YCQueueU64Meta::from_u64(0);
+        let slot_count: u16 = 10;
+        let mut meta: YCQueueU64Meta = YCQueueU64Meta::from_u64(0, slot_count);
 
         assert_eq!(meta.produce_idx, 0);
-        assert_eq!(meta.consume_idx, 0);
+        assert_eq!(meta.consume_idx(), 0);
         assert_eq!(meta.in_flight, 0);
         assert_eq!(meta.to_u64(), 0);
 
-        let test_produce_idx: u16 = 1;
-        let test_consume_idx: u16 = 2;
+        let test_produce_idx: u16 = 5;
         let test_in_flight: u16 = 3;
 
         meta.produce_idx = test_produce_idx;
-        meta.consume_idx = test_consume_idx;
         meta.in_flight = test_in_flight;
 
+        // consume_idx should be computed as (5 - 3) = 2
+        assert_eq!(meta.consume_idx(), 2);
+
         // create new meta as copy from u64
-        let new_meta = YCQueueU64Meta::from_u64(meta.to_u64());
+        let new_meta = YCQueueU64Meta::from_u64(meta.to_u64(), slot_count);
 
         // validate u64 rep is same
         assert_eq!(meta.to_u64(), new_meta.to_u64());
 
         // validate fields are also the same
         assert_eq!(meta.produce_idx, new_meta.produce_idx);
-        assert_eq!(meta.consume_idx, new_meta.consume_idx);
+        assert_eq!(meta.consume_idx(), new_meta.consume_idx());
         assert_eq!(meta.in_flight, new_meta.in_flight);
+
+        // Test wrapping case: produce_idx < in_flight
+        meta.produce_idx = 2;
+        meta.in_flight = 5;
+        // consume_idx should be (10 - (5 - 2)) = 10 - 3 = 7
+        assert_eq!(meta.consume_idx(), 7);
     }
 }
