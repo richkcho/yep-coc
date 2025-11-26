@@ -175,7 +175,7 @@ impl<'a> YCQueue<'a> {
                         return YCQueueOwner::Producer;
                     }
                 }
-                Err(_) => continue,
+                Err(_) => std::hint::spin_loop(),
             }
         }
     }
@@ -241,7 +241,7 @@ impl<'a> YCQueue<'a> {
                     Ordering::Acquire,
                 ) {
                     Ok(_) => break,
-                    Err(_) => continue,
+                    Err(_) => std::hint::spin_loop(),
                 }
             }
 
@@ -388,7 +388,7 @@ impl<'a> YCQueue<'a> {
                 Ordering::Acquire,
             ) {
                 Ok(_) => break produce_idx,
-                Err(_) => continue,
+                Err(_) => std::hint::spin_loop(),
             }
         };
 
@@ -636,7 +636,7 @@ impl<'a> YCQueue<'a> {
                 Ordering::Acquire,
             ) {
                 Ok(_) => break consume_idx,
-                Err(_) => continue,
+                Err(_) => std::hint::spin_loop(),
             }
         };
 
