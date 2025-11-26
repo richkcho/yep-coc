@@ -12,7 +12,7 @@ pub struct YCQueueSharedMeta<'a> {
 }
 
 /// Producer and consumer counters live here. This is all in one atomic u64 to allow for atomic updates of all
-/// fields at once. This has the drawback that the fields occupy the same cache line. Howeer, for a produce +
+/// fields at once. This has the drawback that the fields occupy the same cache line. However, for a produce +
 /// consume operation, both producer and consumer will need to synchronize on both producer and consumer counters,
 /// so splitting it into separate cache lines may not be beneficial. It's likely hw dependent, but I don't know
 /// without data first.
@@ -55,11 +55,7 @@ impl YCQueueU64Meta {
         let in_flight = self.in_flight as u32;
         let slot_count = self.slot_count as u32;
 
-        if produce_idx >= in_flight {
-            (produce_idx - in_flight) as u16
-        } else {
-            (slot_count - (in_flight - produce_idx)) as u16
-        }
+        ((produce_idx + slot_count - in_flight) % slot_count) as u16
     }
 }
 
