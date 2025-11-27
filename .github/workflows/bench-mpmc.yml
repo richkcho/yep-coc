@@ -1,4 +1,4 @@
-name: Manual PR Benchmarks
+name: Manual MPMC Benchmarks
 
 on:
   workflow_dispatch:
@@ -97,7 +97,7 @@ jobs:
       - name: Run baseline on main (only if missing)
         if: steps.baseline-cache.outputs.cache-hit != 'true'
         working-directory: main-baseline
-        run: cargo bench --bench spsc-throughput -- --measurement-time 20 --sample-size 20 --save-baseline main
+        run: cargo bench --bench mpmc-throughput -- --measurement-time 20 --sample-size 50 --save-baseline main
 
       - name: Save baseline cache (before PR run)
         if: steps.baseline-cache.outputs.cache-hit != 'true'
@@ -109,7 +109,7 @@ jobs:
       - name: Run benchmarks for PR against main baseline
         id: bench-pr
         run: |
-          cargo bench --bench spsc-throughput -- --measurement-time 20 --sample-size 20 --baseline main 2>&1 | tee bench_output.txt
+          cargo bench --bench mpmc-throughput -- --measurement-time 20 --sample-size 50 --baseline main 2>&1 | tee bench_output.txt
 
       - name: Upload criterion reports
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
@@ -132,7 +132,7 @@ jobs:
           
           # Parse the benchmark output
           # Criterion outputs lines like:
-          # "spsc//cap32_payload32_batch1"
+          # "mpmc//cap32_payload32_batch1_prod2_cons2"
           # "                        time:   [201.34 ms 206.26 ms 210.69 ms]"
           # "                 change:"
           # "                        time:   [-8.2272% -5.7068% -3.1975%] (p = 0.00 < 0.05)"
@@ -141,7 +141,7 @@ jobs:
           awk '
             BEGIN { 
               # Default benchmark group prefix to strip from display names
-              benchmark_group = "spsc//"
+              benchmark_group = "mpmc//"
             }
             # Match benchmark name lines (lines that start with non-whitespace and contain /)
             /^[^ \t]/ && /\// {
@@ -165,11 +165,11 @@ jobs:
               time_unit = ""
             }
             # Look for current time in "time:" line before change section
-            /^ *time: *\[/ && !in_change_section {
+            /^ *time: *\\[/ && !in_change_section {
               # Extract the middle value from [lower middle upper]
               # Format: [201.34 ms 206.26 ms 210.69 ms]
               # After split: [1]=201.34 [2]=ms [3]=206.26 [4]=ms [5]=210.69 [6]=ms
-              match($0, /\[([^]]+)\]/, arr)
+              match($0, /\\[([^]]+)\\]/, arr)
               split(arr[1], times, " ")
               # Verify we have enough elements (at least 4 for value and unit)
               if (length(times) >= 4) {
@@ -183,11 +183,11 @@ jobs:
               next
             }
             # After "change:" header, look for the time line with percentages
-            in_change_section == 1 && /^ *time: *\[/ {
+            in_change_section == 1 && /^ *time: *\\[/ {
               # Extract change percentage range (the middle value from the three values)
               # Format: [-8.2272% -5.7068% -3.1975%]
               # After split: [1]=-8.2272% [2]=-5.7068% [3]=-3.1975%
-              match($0, /\[([^]]+)\]/, arr)
+              match($0, /\\[([^]]+)\\]/, arr)
               split(arr[1], changes, " ")
               
               # Verify we have at least 2 elements
@@ -299,7 +299,7 @@ jobs:
               ``,
               `- Run: ${runUrl}`,
               `- Artifact: ${artifactName} (reports + baseline/compare data)`
-            ].join('\n');
+            ].join('\\n');
 
             const commentId = "${{ steps.progress-comment.outputs.comment_id }}";
             if (commentId) {
@@ -331,7 +331,7 @@ jobs:
               `⚠️ Benchmark run failed for PR #${prNumber}.`,
               ``,
               `Please check the [workflow run](${runUrl}) for details.`
-            ].join('\n');
+            ].join('\\n');
 
             const commentId = "${{ steps.progress-comment.outputs.comment_id }}";
             if (commentId) {

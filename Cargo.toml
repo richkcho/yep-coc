@@ -31,3 +31,7 @@ wait_on_address = { version = "0.1", optional = true }
 [[bench]]
 name = "spsc-throughput"
 harness = false
+
+[[bench]]
+name = "mpmc-throughput"
+harness = false
