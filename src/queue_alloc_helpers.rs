@@ -5,13 +5,6 @@ cfg_if::cfg_if! {
     }
 }
 
-cfg_if::cfg_if! {
-    if #[cfg(feature = "mutex")] {
-        use std::sync::{Condvar, Mutex};
-        use crate::YCMutexQueue;
-    }
-}
-
 use crate::{YCQueue, YCQueueError, YCQueueSharedMeta};
 use std::sync::atomic::{AtomicU16, AtomicU64};
 
@@ -202,81 +195,6 @@ impl<'a> YCFutexQueue<'a> {
     }
 }
 
-#[cfg(feature = "mutex")]
-#[derive(Debug)]
-pub struct YCMutexQueueOwnedData {
-    pub data: YCQueueOwnedData,
-    pub count: Mutex<i32>,
-    pub condvar: Condvar,
-}
-
-#[cfg(feature = "mutex")]
-impl YCMutexQueueOwnedData {
-    pub fn new(slot_count_u16: u16, slot_size_u16: u16) -> YCMutexQueueOwnedData {
-        let data = YCQueueOwnedData::new(slot_count_u16, slot_size_u16);
-        let count = Mutex::new(0);
-        let condvar = Condvar::new();
-
-        YCMutexQueueOwnedData {
-            data,
-            count,
-            condvar,
-        }
-    }
-}
-
-#[cfg(feature = "mutex")]
-#[derive(Debug)]
-pub struct YCMutexQueueSharedData<'a> {
-    pub data: YCQueueSharedData<'a>,
-    pub count: &'a Mutex<i32>,
-    pub condvar: &'a Condvar,
-}
-
-#[cfg(feature = "mutex")]
-impl<'a> YCMutexQueueSharedData<'a> {
-    pub fn from_owned_data(
-        blocking_queue: &'a YCMutexQueueOwnedData,
-    ) -> YCMutexQueueSharedData<'a> {
-        let data = YCQueueSharedData::from_owned_data(&blocking_queue.data);
-        let count = &blocking_queue.count;
-        let condvar = &blocking_queue.condvar;
-
-        YCMutexQueueSharedData {
-            data,
-            count,
-            condvar,
-        }
-    }
-}
-
-#[cfg(feature = "mutex")]
-impl<'a> YCMutexQueue<'a> {
-    pub fn from_shared_data(
-        shared: YCMutexQueueSharedData<'a>,
-    ) -> Result<YCMutexQueue<'a>, YCQueueError> {
-        let queue = YCQueue::new(shared.data.meta, shared.data.data)?;
-
-        Ok(YCMutexQueue {
-            queue,
-            count: shared.count,
-            condvar: shared.condvar,
-        })
-    }
-
-    pub fn from_owned_data(
-        owned: &'a YCMutexQueueOwnedData,
-    ) -> Result<YCMutexQueue<'a>, YCQueueError> {
-        let queue = YCQueue::from_owned_data(&owned.data)?;
-
-        Ok(YCMutexQueue {
-            queue,
-            count: &owned.count,
-            condvar: &owned.condvar,
-        })
-    }
-}
-
 #[cfg(test)]
 mod queue_alloc_helpers_tests {
     use super::*;
@@ -412,52 +330,5 @@ mod queue_alloc_helpers_tests {
             shared.count.store(77, Ordering::Release);
         }
         assert_eq!(owned.count.load(Ordering::Acquire), 77);
-    }
-
-    #[cfg(feature = "mutex")]
-    #[test]
-    fn test_blocking_shared_queue_and_counter() {
-        let slot_count: u16 = 4;
-        let slot_size: u16 = 16;
-
-        let mut owned = YCMutexQueueOwnedData::new(slot_count, slot_size);
-
-        // Seed underlying queue data through owned handle.
-        for (idx, byte) in owned.data.data.iter_mut().enumerate() {
-            *byte = idx as u8;
-        }
-
-        let data_len = owned.data.data.len();
-        {
-            let shared = YCMutexQueueSharedData::from_owned_data(&owned);
-            let data = shared.data.data;
-            assert_eq!(data, owned.data.data.as_slice());
-
-            // Mutate through the shared handle and ensure the owned buffer sees it.
-            data[0] = 0xAA;
-            data[data.len() - 1] = 0xBB;
-        }
-        assert_eq!(owned.data.data[0], 0xAA);
-        assert_eq!(owned.data.data[data_len - 1], 0xBB);
-
-        // Mutate through owned handle and verify the shared slice reflects changes.
-        owned.data.data[1] = 0xCC;
-        owned.data.data[data_len / 2] = 0xDD;
-        {
-            let shared_again = YCMutexQueueSharedData::from_owned_data(&owned);
-            let data_again = shared_again.data.data;
-            assert_eq!(data_again[1], 0xCC);
-            assert_eq!(data_again[data_again.len() / 2], 0xDD);
-        }
-
-        // Verify the mutex counter is shared.
-        *owned.count.lock().unwrap() = 123;
-        {
-            let shared = YCMutexQueueSharedData::from_owned_data(&owned);
-            assert_eq!(*shared.count.lock().unwrap(), 123);
-
-            *shared.count.lock().unwrap() = 77;
-        }
-        assert_eq!(*owned.count.lock().unwrap(), 77);
     }
 }
