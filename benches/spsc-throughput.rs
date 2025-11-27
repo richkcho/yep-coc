@@ -19,15 +19,13 @@
 //!   iteration count, providing consistent measurement windows.
 //!
 //! # Parameters Swept
-//! - Capacities: 256, 512, 1024 slots
-//! - Payload sizes: 64, 256, 512 bytes
-//! - Batch sizes: 1, 8, 32 (operations per API call)
+//! - Capacities: 32, 1024 slots
+//! - Payload sizes: 32, 512 bytes
+//! - Batch sizes: 1, 16, 32 (operations per API call)
 //!
 //! # Configuration
 //! - Sample duration: 200 milliseconds per sample
-//! - Measurement time: 20 seconds total
-//! - Sample size: 20 measurements
-//! - Warm-up time: 2 seconds
+//! - Measurement settings: use Criterion defaults unless overridden on the CLI
 //! - Throughput reported in messages/second
 
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
@@ -352,7 +350,7 @@ fn is_verbose_mode() -> bool {
 /// Benchmark function that measures steady-state throughput of SPSC queue
 /// Uses time-based samples with iter_custom
 fn bench_spsc(c: &mut Criterion) {
-    let mut group = c.benchmark_group("spsc/");
+    let mut group = c.benchmark_group("spsc");
 
     // Use a fixed sample duration for consistent measurement windows
     let sample_duration = Duration::from_millis(200);
@@ -410,7 +408,7 @@ fn bench_spsc(c: &mut Criterion) {
                             );
                         }
 
-                        // we can't return the time processed directly, so scale to account for items processed
+                        // the duration here is per `items_per_sample`` items.
                         Duration::from_nanos((total.as_nanos() * total_items as u128 / (iters as u128 * items_per_sample as u128)) as u64)
                     });
                 });
