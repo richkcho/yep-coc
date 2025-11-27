@@ -195,7 +195,6 @@ impl<'a> YCFutexQueue<'a> {
     }
 }
 
-
 #[cfg(test)]
 mod queue_alloc_helpers_tests {
     use super::*;
@@ -332,5 +331,4 @@ mod queue_alloc_helpers_tests {
         }
         assert_eq!(owned.count.load(Ordering::Acquire), 77);
     }
-
 }
