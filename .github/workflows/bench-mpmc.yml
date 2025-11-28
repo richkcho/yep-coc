@@ -9,7 +9,8 @@ on:
         type: number
       runner_labels:
         description: 'Comma-separated labels for the self-hosted benchmark runner (e.g. "bench,linux")'
-        required: true
+        required: false
+        default: 'bench'
         type: string
 
 permissions:
