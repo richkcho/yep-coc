@@ -8,9 +8,9 @@ on:
         required: true
         type: number
       runner_labels:
-        description: 'Comma-separated labels for the self-hosted benchmark runner (e.g. "bench,linux")'
+        description: 'Comma-separated additional labels for the self-hosted benchmark runner (e.g. "linux")'
         required: false
-        default: 'bench'
+        default: ''
         type: string
 
 permissions:
@@ -34,7 +34,7 @@ jobs:
           labels="${{ inputs.runner_labels }}"
           labels="${labels// /}"                 # strip spaces
           labels="${labels//,/\",\"}"            # turn comma list into quoted csv
-          echo "runner_labels_list=[\"self-hosted\"${labels:+,\"$labels\"}]" >> "$GITHUB_OUTPUT"
+          echo "runner_labels_list=[\"self-hosted\",\"bench\"${labels:+,\"$labels\"}]" >> "$GITHUB_OUTPUT"
 
   benchmark:
     name: Bench PR #${{ inputs.pr_number }}
@@ -97,7 +97,7 @@ jobs:
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1 # v2.8.1
         with:
-          shared-key: bench-${{ inputs.runner_labels }}
+          shared-key: bench-${{ runner.name }}
           workspaces: |
             .
             main-baseline
@@ -108,7 +108,7 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ${{ env.CARGO_TARGET_DIR }}/criterion
-          key: criterion-main-${{ inputs.runner_labels }}-${{ steps.main_sha.outputs.sha }}
+          key: criterion-main-${{ runner.name }}-${{ steps.main_sha.outputs.sha }}
 
       - name: Run baseline on main (only if missing)
         if: steps.baseline-cache.outputs.cache-hit != 'true'
@@ -120,7 +120,7 @@ jobs:
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ${{ env.CARGO_TARGET_DIR }}/criterion
-          key: criterion-main-${{ inputs.runner_labels }}-${{ steps.main_sha.outputs.sha }}
+          key: criterion-main-${{ runner.name }}-${{ steps.main_sha.outputs.sha }}
 
       - name: Run benchmarks for PR against main baseline
         id: bench-pr
