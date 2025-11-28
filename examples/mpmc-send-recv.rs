@@ -53,6 +53,18 @@ struct Args {
     verbose: bool,
 }
 
+fn backoff(pow: &mut u8) {
+    if *pow < 6 {
+        let spins = 1 << *pow;
+        for _ in 0..spins {
+            std::hint::spin_loop();
+        }
+        *pow += 1;
+    } else {
+        std::thread::yield_now();
+    }
+}
+
 fn warn_for_thread_counts(args: &Args) {
     let available_cpus = std::thread::available_parallelism()
         .map(|n| n.get())
@@ -110,7 +122,7 @@ fn main() {
     println!("  Producer threads: {}", args.producer_threads);
     println!("  Consumer threads: {}", args.consumer_threads);
 
-    if args.in_flight_count > args.queue_depth {
+    if args.in_flight_count != 0 && args.in_flight_count > args.queue_depth {
         panic!("in_flight_count cannot be larger than queue_depth");
     }
 
@@ -173,7 +185,11 @@ fn main() {
 
             let validation_len = validation_len as usize;
             let verbose = args.verbose;
-            let in_flight_limit = args.in_flight_count;
+            let in_flight_limit = if args.in_flight_count == 0 {
+                None
+            } else {
+                Some(args.in_flight_count)
+            };
             let msg_check_len = args.msg_check_len;
             let batch_size = args.batch_size;
             let earliest_start = Arc::clone(&earliest_producer_start);
@@ -182,21 +198,25 @@ fn main() {
                 let mut local_sent = 0_u32;
                 let mut next_msg_index = range_start;
                 let thread_start = std::time::Instant::now();
+                let mut backoff_pow = 0;
 
                 while next_msg_index < range_end {
-                    let in_flight = queue.in_flight_count();
-                    if in_flight >= in_flight_limit {
-                        thread::yield_now();
-                        continue;
-                    }
-
                     loop {
                         let remaining = range_end - next_msg_index;
-                        let available_in_flight = in_flight_limit - queue.in_flight_count();
-                        let request = batch_size.min(available_in_flight).min(remaining as u16);
+                        let request = if let Some(limit) = in_flight_limit {
+                            let in_flight = queue.in_flight_count();
+                            if in_flight >= limit {
+                                backoff(&mut backoff_pow);
+                                continue;
+                            }
+                            let available_in_flight = limit.saturating_sub(queue.in_flight_count());
+                            batch_size.min(available_in_flight).min(remaining as u16)
+                        } else {
+                            batch_size.min(remaining as u16)
+                        };
 
                         if request == 0 {
-                            thread::yield_now();
+                            backoff(&mut backoff_pow);
                             continue;
                         }
 
@@ -226,10 +246,11 @@ fn main() {
 
                                 local_sent += slots.len() as u32;
                                 queue.mark_slots_produced(slots).unwrap();
+                                backoff_pow = 0;
                                 break;
                             }
                             Err(YCQueueError::OutOfSpace) | Err(YCQueueError::SlotNotReady) => {
-                                thread::yield_now();
+                                backoff(&mut backoff_pow);
                             }
                             Err(e) => panic!("Producer error: {e:?}"),
                         }
@@ -268,6 +289,7 @@ fn main() {
 
             s.spawn(move || {
                 let mut local_received = 0_u32;
+                let mut backoff_pow = 0;
                 let mut local_validations = if msg_check_len > 0 {
                     Vec::with_capacity((msg_count as usize / 2) + 1)
                 } else {
@@ -305,9 +327,10 @@ fn main() {
 
                             queue.mark_slots_consumed(slots).unwrap();
                             local_received += processed;
+                            backoff_pow = 0;
                         }
                         Err(YCQueueError::EmptyQueue) | Err(YCQueueError::SlotNotReady) => {
-                            thread::yield_now();
+                            backoff(&mut backoff_pow);
                         }
                         Err(e) => panic!("Consumer error: {e:?}"),
                     }
