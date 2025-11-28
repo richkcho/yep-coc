@@ -4,13 +4,14 @@
 //! time-based samples. Threads are pinned to distinct cores, start simultaneously via a barrier,
 //! and run for fixed-duration samples to avoid unbounded loops if logic regresses.
 
-use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::collections::HashSet;
+use std::hint::black_box;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time::{Duration, Instant};
-use test_support::utils::backoff;
+use test_support::utils::{backoff, cache_line_size};
 use yep_coc::{
     YCQueue, YCQueueError,
     queue_alloc_helpers::{YCQueueOwnedData, YCQueueSharedData},
@@ -98,6 +99,7 @@ fn select_cores(count: usize) -> Vec<usize> {
 /// Run a single MPMC sample for a fixed duration.
 /// Returns (elapsed_duration, items_processed)
 fn run_mpmc_sample(params: &Params, sample_duration: Duration) -> (Duration, u64) {
+    let touch_stride = std::cmp::max(1, cache_line_size() as usize);
     let total_workers = params.producers as usize + params.consumers as usize;
     let core_selection = select_cores(total_workers);
     let (producer_cores, consumer_cores) = core_selection.split_at(params.producers as usize);
@@ -143,6 +145,7 @@ fn run_mpmc_sample(params: &Params, sample_duration: Duration) -> (Duration, u64
                     if params.batch_size == 1 {
                         match queue.get_produce_slot() {
                             Ok(slot) => {
+                                touch_produce(slot.data, touch_stride);
                                 black_box(&slot.data);
                                 queue
                                     .mark_slot_produced(slot)
@@ -159,6 +162,7 @@ fn run_mpmc_sample(params: &Params, sample_duration: Duration) -> (Duration, u64
                         match queue.get_produce_slots(params.batch_size, true) {
                             Ok(mut slots) => {
                                 slots.iter_mut().for_each(|slot| {
+                                    touch_produce(slot.data, touch_stride);
                                     black_box(&slot.data);
                                 });
                                 local += slots.len() as u64;
@@ -203,6 +207,7 @@ fn run_mpmc_sample(params: &Params, sample_duration: Duration) -> (Duration, u64
                     if params.batch_size == 1 {
                         match queue.get_consume_slot() {
                             Ok(slot) => {
+                                touch_consume(slot.data, touch_stride);
                                 black_box(&slot.data);
                                 queue
                                     .mark_slot_consumed(slot)
@@ -219,6 +224,7 @@ fn run_mpmc_sample(params: &Params, sample_duration: Duration) -> (Duration, u64
                         match queue.get_consume_slots(params.batch_size, true) {
                             Ok(slots) => {
                                 slots.iter().for_each(|slot| {
+                                    touch_consume(slot.data, touch_stride);
                                     black_box(&slot.data);
                                 });
                                 local += slots.len() as u64;
@@ -276,6 +282,18 @@ fn is_verbose_mode() -> bool {
     }
 
     std::env::args().any(|arg| arg == "--verbose" || arg == "-v")
+}
+
+fn touch_produce(data: &mut [u8], stride: usize) {
+    for idx in (0..data.len()).step_by(stride) {
+        data[idx] = data[idx].wrapping_add(1);
+    }
+}
+
+fn touch_consume(data: &[u8], stride: usize) {
+    for idx in (0..data.len()).step_by(stride) {
+        black_box(data[idx]);
+    }
 }
 
 fn bench_mpmc(c: &mut Criterion) {

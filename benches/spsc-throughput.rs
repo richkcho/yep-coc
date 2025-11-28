@@ -28,12 +28,14 @@
 //! - Measurement settings: use Criterion defaults unless overridden on the CLI
 //! - Throughput reported in messages/second
 
-use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::collections::HashMap;
+use std::hint::black_box;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time::{Duration, Instant};
+use test_support::utils::{backoff, cache_line_size};
 use yep_coc::{
     YCQueue, YCQueueError,
     queue_alloc_helpers::{YCQueueOwnedData, YCQueueSharedData},
@@ -59,19 +61,6 @@ impl Params {
             "cap{}_payload{}_batch{}",
             self.capacity, self.payload_size, self.batch_size
         )
-    }
-}
-
-/// Simple exponential backoff: spin a little before yielding to keep threads resident.
-fn backoff(pow: &mut u8) {
-    if *pow < 6 {
-        let spins = 1 << *pow;
-        for _ in 0..spins {
-            std::hint::spin_loop();
-        }
-        *pow += 1;
-    } else {
-        thread::yield_now();
     }
 }
 
@@ -153,6 +142,7 @@ fn run_spsc_sample(
     sample_duration: Duration,
     producer_core: usize,
     consumer_core: usize,
+    touch_stride: usize,
 ) -> (Duration, u64) {
     // Barrier to synchronize thread start
     let barrier = Arc::new(Barrier::new(3));
@@ -206,6 +196,7 @@ fn run_spsc_sample(
                     // Single-slot operation
                     match consumer_queue.get_consume_slot() {
                         Ok(consume_slot) => {
+                            touch_consume(consume_slot.data, touch_stride);
                             black_box(&consume_slot.data);
                             consumer_queue
                                 .mark_slot_consumed(consume_slot)
@@ -223,6 +214,7 @@ fn run_spsc_sample(
                     match consumer_queue.get_consume_slots(params.batch_size, true) {
                         Ok(slots) => {
                             slots.iter().for_each(|slot| {
+                                touch_consume(slot.data, touch_stride);
                                 black_box(&slot.data);
                             });
                             local_count += slots.len() as u64;
@@ -264,6 +256,7 @@ fn run_spsc_sample(
                     // Single-slot operation
                     match producer_queue.get_produce_slot() {
                         Ok(produce_slot) => {
+                            touch_produce(produce_slot.data, touch_stride);
                             black_box(&produce_slot.data);
                             producer_queue
                                 .mark_slot_produced(produce_slot)
@@ -281,6 +274,7 @@ fn run_spsc_sample(
                     match producer_queue.get_produce_slots(params.batch_size, true) {
                         Ok(mut slots) => {
                             slots.iter_mut().for_each(|slot| {
+                                touch_produce(slot.data, touch_stride);
                                 black_box(&slot.data);
                             });
                             local_count += slots.len() as u64;
@@ -347,6 +341,18 @@ fn is_verbose_mode() -> bool {
     std::env::args().any(|arg| arg == "--verbose" || arg == "-v")
 }
 
+fn touch_produce(data: &mut [u8], stride: usize) {
+    for idx in (0..data.len()).step_by(stride) {
+        data[idx] = data[idx].wrapping_add(1);
+    }
+}
+
+fn touch_consume(data: &[u8], stride: usize) {
+    for idx in (0..data.len()).step_by(stride) {
+        black_box(data[idx]);
+    }
+}
+
 /// Benchmark function that measures steady-state throughput of SPSC queue
 /// Uses time-based samples with iter_custom
 fn bench_spsc(c: &mut Criterion) {
@@ -360,6 +366,7 @@ fn bench_spsc(c: &mut Criterion) {
     let capacities = vec![32, 1024];
     let payload_sizes = vec![32, 512];
     let batch_sizes = vec![1, 16, 32];
+    let touch_stride = std::cmp::max(1, cache_line_size() as usize);
 
     for capacity in &capacities {
         for payload_size in &payload_sizes {
@@ -372,8 +379,13 @@ fn bench_spsc(c: &mut Criterion) {
 
                 // Pre-run a sample to estimate items processed per iteration so Criterion can
                 // compute throughput instead of only showing the fixed sample duration.
-                let (_probe_dt, probe_items) =
-                    run_spsc_sample(&params, sample_duration, producer_core, consumer_core);
+                let (_probe_dt, probe_items) = run_spsc_sample(
+                    &params,
+                    sample_duration,
+                    producer_core,
+                    consumer_core,
+                    touch_stride,
+                );
                 let items_per_sample = probe_items.max(1);
 
                 // this is telling criterion that the time reported below corresponds to processing
@@ -393,6 +405,7 @@ fn bench_spsc(c: &mut Criterion) {
                                 sample_duration,
                                 producer_core,
                                 consumer_core,
+                                touch_stride,
                             );
                             total += dt;
                             total_items += items;
