@@ -3,7 +3,7 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-use test_support::utils::{align_to_cache_line, copy_str_to_slice, str_from_u8};
+use test_support::utils::{align_to_cache_line, backoff, copy_str_to_slice, str_from_u8};
 use yep_coc::{
     YCQueue, YCQueueError, queue_alloc_helpers::YCQueueOwnedData,
     queue_alloc_helpers::YCQueueSharedData,
@@ -62,12 +62,12 @@ fn main() {
     println!("  Total messages: {}", args.msg_count);
 
     // Validate arguments
-    if args.in_flight_count > args.queue_depth {
+    if args.in_flight_count != 0 && args.in_flight_count > args.queue_depth {
         panic!("in_flight_count cannot be larger than queue_depth");
     }
 
-    if args.in_flight_count == 0 || args.queue_depth == 0 {
-        panic!("in_flight_count and queue_depth must be greater than zero");
+    if args.queue_depth == 0 {
+        panic!("queue_depth must be greater than zero");
     }
 
     if args.batch_size == 0 {
@@ -101,6 +101,7 @@ fn main() {
         // Consumer thread
         s.spawn(|| {
             let mut messages_received = 0;
+            let mut backoff_pow = 0;
             while messages_received < args.msg_count {
                 if test_start.elapsed() >= timeout {
                     panic!(
@@ -132,9 +133,10 @@ fn main() {
 
                         messages_received += slots.len() as u32;
                         consumer_queue.mark_slots_consumed(slots).unwrap();
+                        backoff_pow = 0;
                     }
                     Err(YCQueueError::EmptyQueue) | Err(YCQueueError::SlotNotReady) => {
-                        thread::yield_now(); // Queue is empty, yield CPU
+                        backoff(&mut backoff_pow);
                     }
                     Err(e) => panic!("Consumer error: {e:?}"),
                 }
@@ -148,6 +150,12 @@ fn main() {
         s.spawn(|| {
             start_time = Instant::now();
             let mut messages_sent = 0;
+            let mut backoff_pow = 0;
+            let in_flight_limit = if args.in_flight_count == 0 {
+                None
+            } else {
+                Some(args.in_flight_count)
+            };
             while messages_sent < args.msg_count {
                 if test_start.elapsed() >= timeout {
                     panic!(
@@ -155,17 +163,21 @@ fn main() {
                         timeout, messages_sent
                     );
                 }
-                let in_flight = producer_queue.in_flight_count();
-                if in_flight >= args.in_flight_count {
-                    thread::yield_now(); // Too many in-flight messages, yield CPU
-                    continue;
-                }
 
-                let available_in_flight = args.in_flight_count - in_flight;
-                let request = args.batch_size.min(available_in_flight);
+                let request = if let Some(limit) = in_flight_limit {
+                    let in_flight = producer_queue.in_flight_count();
+                    if in_flight >= limit {
+                        backoff(&mut backoff_pow);
+                        continue;
+                    }
+                    let available_in_flight = limit.saturating_sub(in_flight);
+                    args.batch_size.min(available_in_flight)
+                } else {
+                    args.batch_size
+                };
 
                 if request == 0 {
-                    thread::yield_now();
+                    backoff(&mut backoff_pow);
                     continue;
                 }
 
@@ -190,9 +202,10 @@ fn main() {
 
                         messages_sent += slots.len() as u32;
                         producer_queue.mark_slots_produced(slots).unwrap();
+                        backoff_pow = 0;
                     }
                     Err(YCQueueError::OutOfSpace) | Err(YCQueueError::SlotNotReady) => {
-                        thread::yield_now(); // Queue is full, yield CPU
+                        backoff(&mut backoff_pow);
                     }
                     Err(e) => panic!("Producer error: {e:?}"),
                 }
