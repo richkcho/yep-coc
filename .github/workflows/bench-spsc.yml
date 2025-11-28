@@ -7,8 +7,8 @@ on:
         description: 'Pull request number to benchmark'
         required: true
         type: number
-      runner_label:
-        description: 'Label for the self-hosted benchmark runner'
+      runner_labels:
+        description: 'Comma-separated labels for the self-hosted benchmark runner (e.g. "bench,linux")'
         required: true
         type: string
 
@@ -21,9 +21,24 @@ env:
   CARGO_TARGET_DIR: ${{ github.workspace }}/.bench-target
 
 jobs:
+  prepare-runner-labels:
+    runs-on: ubuntu-latest
+    outputs:
+      runner_labels_list: ${{ steps.build-labels.outputs.runner_labels_list }}
+    steps:
+      - name: Build runner label list
+        id: build-labels
+        shell: bash
+        run: |
+          labels="${{ inputs.runner_labels }}"
+          labels="${labels// /}"                 # strip spaces
+          labels="${labels//,/\",\"}"            # turn comma list into quoted csv
+          echo "runner_labels_list=[\"self-hosted\"${labels:+,\"$labels\"}]" >> "$GITHUB_OUTPUT"
+
   benchmark:
     name: Bench PR #${{ inputs.pr_number }}
-    runs-on: [self-hosted, '${{ inputs.runner_label }}']
+    needs: prepare-runner-labels
+    runs-on: ${{ fromJson(needs.prepare-runner-labels.outputs.runner_labels_list) }}
     outputs:
       pr_number: ${{ steps.parse-pr.outputs.pr_number }}
 
@@ -47,7 +62,7 @@ jobs:
           script: |
             // Use the parsed PR number integer
             const prNumber = ${{ steps.parse-pr.outputs.pr_number }};
-            const body = `Benchmark run started on runner label \`${{ inputs.runner_label }}\`...`;
+            const body = `Benchmark run started on runner label(s) \`${{ inputs.runner_labels }}\`...`;
             const { data: comment } = await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
