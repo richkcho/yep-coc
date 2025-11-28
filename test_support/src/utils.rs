@@ -6,6 +6,19 @@ use yep_cache_line_size::{CacheLevel, CacheType, get_cache_line_size};
 
 static CACHE_LINE_SIZE: AtomicU16 = AtomicU16::new(0);
 
+/// Simple exponential backoff used by examples/benchmarks to avoid hammering the scheduler.
+pub fn backoff(pow: &mut u8) {
+    if *pow < 6 {
+        let spins = 1 << *pow;
+        for _ in 0..spins {
+            std::hint::spin_loop();
+        }
+        *pow += 1;
+    } else {
+        std::thread::yield_now();
+    }
+}
+
 pub fn str_to_u8(s: &str) -> &[u8] {
     s.as_bytes()
 }

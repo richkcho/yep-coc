@@ -3,7 +3,7 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-use test_support::utils::{align_to_cache_line, copy_str_to_slice, str_from_u8};
+use test_support::utils::{align_to_cache_line, backoff, copy_str_to_slice, str_from_u8};
 use yep_coc::{
     YCQueue, YCQueueError, queue_alloc_helpers::YCQueueOwnedData,
     queue_alloc_helpers::YCQueueSharedData,
@@ -42,18 +42,6 @@ struct Args {
     /// Timeout in seconds for sender/receiver loops
     #[arg(short = 't', long, default_value = "10")]
     timeout_secs: u64,
-}
-
-fn backoff(pow: &mut u8) {
-    if *pow < 6 {
-        let spins = 1 << *pow;
-        for _ in 0..spins {
-            std::hint::spin_loop();
-        }
-        *pow += 1;
-    } else {
-        thread::yield_now();
-    }
 }
 
 fn main() {

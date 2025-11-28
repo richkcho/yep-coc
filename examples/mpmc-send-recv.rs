@@ -7,7 +7,7 @@ use clap::Parser;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use test_support::utils::{align_to_cache_line, copy_str_to_slice, str_from_u8};
+use test_support::utils::{align_to_cache_line, backoff, copy_str_to_slice, str_from_u8};
 use yep_coc::{
     YCQueue, YCQueueError,
     queue_alloc_helpers::{YCQueueOwnedData, YCQueueSharedData},
@@ -51,18 +51,6 @@ struct Args {
     /// Enable verbose logging
     #[arg(short = 'v', long, default_value_t = false)]
     verbose: bool,
-}
-
-fn backoff(pow: &mut u8) {
-    if *pow < 6 {
-        let spins = 1 << *pow;
-        for _ in 0..spins {
-            std::hint::spin_loop();
-        }
-        *pow += 1;
-    } else {
-        std::thread::yield_now();
-    }
 }
 
 fn warn_for_thread_counts(args: &Args) {

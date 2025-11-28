@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time::{Duration, Instant};
+use test_support::utils::backoff;
 use yep_coc::{
     YCQueue, YCQueueError,
     queue_alloc_helpers::{YCQueueOwnedData, YCQueueSharedData},
@@ -35,18 +36,6 @@ impl Params {
             "cap{}_payload{}_batch{}_prod{}_cons{}",
             self.capacity, self.payload_size, self.batch_size, self.producers, self.consumers
         )
-    }
-}
-
-fn backoff(pow: &mut u8) {
-    if *pow < 6 {
-        let spins = 1 << *pow;
-        for _ in 0..spins {
-            std::hint::spin_loop();
-        }
-        *pow += 1;
-    } else {
-        thread::yield_now();
     }
 }
 
