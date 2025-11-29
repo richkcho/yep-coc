@@ -37,7 +37,7 @@ jobs:
           echo "runner_labels_list=[\"self-hosted\",\"bench\"${labels:+,\"$labels\"}]" >> "$GITHUB_OUTPUT"
 
   benchmark:
-    name: Bench ${{ inputs.pr_number == 0 && 'main' || format('PR #{0}', inputs.pr_number) }}
+    name: ${{ inputs.pr_number == 0 && 'Bench main' || format('Bench PR {0}', inputs.pr_number) }}
     needs: prepare-runner-labels
     runs-on: ${{ fromJson(needs.prepare-runner-labels.outputs.runner_labels_list) }}
     outputs:
