@@ -137,12 +137,7 @@ jobs:
       - name: Run benchmarks for PR against main baseline
         id: bench-pr
         run: |
-          save_flag=()
-          if [ "${{ steps.parse-pr.outputs.is_main_run }}" = "true" ]; then
-            # Refresh baseline for next main run while comparing against the previous one.
-            save_flag=(--save-baseline main)
-          fi
-          cargo bench --bench spsc-throughput -- --measurement-time 20 --sample-size 50 --baseline main "${save_flag[@]}" 2>&1 | tee bench_output.txt
+          cargo bench --bench spsc-throughput -- --measurement-time 20 --sample-size 50 --baseline main 2>&1 | tee bench_output.txt
 
       - name: Upload criterion reports
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
