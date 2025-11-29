@@ -1,5 +1,7 @@
 use clap::Parser;
 use std::{
+    sync::atomic::{AtomicBool, Ordering},
+    sync::{Arc, Barrier, Mutex},
     thread,
     time::{Duration, Instant},
 };
@@ -88,22 +90,43 @@ fn main() {
     let mut producer_queue = YCQueue::new(producer_data.meta, producer_data.data).unwrap();
 
     let timeout = Duration::from_secs(args.timeout_secs);
-    let test_start = Instant::now();
-
-    // time when producer thread starts
-    let mut start_time = test_start;
-
-    // time when consumer thread finishes
-    let mut end_time = test_start;
+    let stop = Arc::new(AtomicBool::new(false));
+    let done = Arc::new(AtomicBool::new(false));
+    let start_time = Arc::new(Mutex::new(None::<Instant>));
+    let end_time = Arc::new(Mutex::new(None::<Instant>));
+    let barrier = Arc::new(Barrier::new(3));
 
     // Use thread scope to ensure all threads complete before program exit
     thread::scope(|s| {
+        // Timer thread: synchronize start, then enforce timeout
+        {
+            let barrier = Arc::clone(&barrier);
+            let stop = Arc::clone(&stop);
+            let done = Arc::clone(&done);
+            let start_time = Arc::clone(&start_time);
+            s.spawn(move || {
+                barrier.wait();
+                let start = Instant::now();
+                *start_time.lock().unwrap() = Some(start);
+                let deadline = start + timeout;
+                while !done.load(Ordering::Relaxed) && Instant::now() < deadline {
+                    thread::sleep(Duration::from_millis(50));
+                }
+                if !done.load(Ordering::Relaxed) {
+                    stop.store(true, Ordering::Relaxed);
+                }
+            });
+        }
+
         // Consumer thread
         s.spawn(|| {
             let mut messages_received = 0;
             let mut backoff_pow = 0;
+            let barrier = Arc::clone(&barrier);
+            let done = Arc::clone(&done);
+            barrier.wait();
             while messages_received < args.msg_count {
-                if test_start.elapsed() >= timeout {
+                if stop.load(Ordering::Relaxed) {
                     panic!(
                         "Consumer timed out after {:?} while waiting for message {}",
                         timeout, messages_received
@@ -142,22 +165,26 @@ fn main() {
                 }
             }
 
-            end_time = Instant::now();
+            *end_time.lock().unwrap() = Some(Instant::now());
+            done.store(true, Ordering::Relaxed);
             println!("Consumer finished after receiving {messages_received} messages");
         });
 
         // Producer thread
         s.spawn(|| {
-            start_time = Instant::now();
+            let barrier = Arc::clone(&barrier);
+            let done = Arc::clone(&done);
+            barrier.wait();
             let mut messages_sent = 0;
             let mut backoff_pow = 0;
-            let in_flight_limit = if args.in_flight_count == 0 {
-                None
-            } else {
-                Some(args.in_flight_count)
-            };
+            let in_flight_limit =
+                if args.in_flight_count == 0 || args.in_flight_count == args.queue_depth {
+                    None
+                } else {
+                    Some(args.in_flight_count)
+                };
             while messages_sent < args.msg_count {
-                if test_start.elapsed() >= timeout {
+                if stop.load(Ordering::Relaxed) {
                     panic!(
                         "Producer timed out after {:?} while waiting to send message {}",
                         timeout, messages_sent
@@ -210,12 +237,14 @@ fn main() {
                     Err(e) => panic!("Producer error: {e:?}"),
                 }
             }
+            done.store(true, Ordering::Relaxed);
             println!("Producer finished after sending {messages_sent} messages");
         });
     });
 
-    println!(
-        "Simple send test finished in {:?} us!",
-        (end_time - start_time).as_micros()
-    );
+    let elapsed = match (*start_time.lock().unwrap(), *end_time.lock().unwrap()) {
+        (Some(start), Some(end)) => end.duration_since(start),
+        _ => Duration::ZERO,
+    };
+    println!("Simple send test finished in {:?} us!", elapsed.as_micros());
 }

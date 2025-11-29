@@ -5,7 +5,7 @@
 
 use clap::Parser;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
 use test_support::utils::{align_to_cache_line, backoff, copy_str_to_slice, str_from_u8};
 use yep_coc::{
@@ -39,6 +39,10 @@ struct Args {
     /// Total number of messages to send
     #[arg(short = 'n', long, default_value = "10000")]
     msg_count: u32,
+
+    /// Timeout in seconds for producer/consumer loops
+    #[arg(short = 't', long, default_value = "10")]
+    timeout_secs: u64,
 
     /// Number of producer threads
     #[arg(short = 'p', long, default_value = "2")]
@@ -146,6 +150,11 @@ fn main() {
     }
 
     let consumed_count = Arc::new(AtomicU32::new(0));
+    let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let barrier = Arc::new(Barrier::new(
+        args.producer_threads as usize + args.consumer_threads as usize + 1,
+    ));
     let validation_storage = Arc::new(Mutex::new(Vec::with_capacity(if args.msg_check_len > 0 {
         args.msg_count as usize
     } else {
@@ -161,6 +170,24 @@ fn main() {
     thread::scope(|s| {
         let mut next_index = 0u32;
 
+        // Timer thread: coordinate start and enforce timeout
+        {
+            let stop = Arc::clone(&stop);
+            let done = Arc::clone(&done);
+            let barrier = Arc::clone(&barrier);
+            s.spawn(move || {
+                barrier.wait();
+                let timeout = std::time::Duration::from_secs(args.timeout_secs);
+                let deadline = std::time::Instant::now() + timeout;
+                while !done.load(Ordering::Relaxed) && std::time::Instant::now() < deadline {
+                    thread::sleep(std::time::Duration::from_millis(50));
+                }
+                if !done.load(Ordering::Relaxed) {
+                    stop.store(true, Ordering::Relaxed);
+                }
+            });
+        }
+
         for (thread_idx, mut queue) in producer_queues.into_iter().enumerate() {
             let extra = if thread_idx < extra_messages as usize {
                 1u32
@@ -173,22 +200,30 @@ fn main() {
 
             let validation_len = validation_len as usize;
             let verbose = args.verbose;
-            let in_flight_limit = if args.in_flight_count == 0 {
-                None
-            } else {
-                Some(args.in_flight_count)
-            };
+            let in_flight_limit =
+                if args.in_flight_count == 0 || args.in_flight_count == args.queue_depth {
+                    None
+                } else {
+                    Some(args.in_flight_count)
+                };
             let msg_check_len = args.msg_check_len;
             let batch_size = args.batch_size;
             let earliest_start = Arc::clone(&earliest_producer_start);
+            let stop = Arc::clone(&stop);
+            let barrier = Arc::clone(&barrier);
+            let done = Arc::clone(&done);
 
             s.spawn(move || {
                 let mut local_sent = 0_u32;
                 let mut next_msg_index = range_start;
                 let thread_start = std::time::Instant::now();
                 let mut backoff_pow = 0;
+                barrier.wait();
 
                 while next_msg_index < range_end {
+                    if stop.load(Ordering::Relaxed) {
+                        panic!("Producer thread {thread_idx} timed out after {:?} (range end {range_end})", std::time::Duration::from_secs(args.timeout_secs));
+                    }
                     loop {
                         let remaining = range_end - next_msg_index;
                         let request = if let Some(limit) = in_flight_limit {
@@ -204,6 +239,9 @@ fn main() {
                         };
 
                         if request == 0 {
+                            if stop.load(Ordering::Relaxed) {
+                                panic!("Producer thread {thread_idx} timed out waiting for in-flight space");
+                            }
                             backoff(&mut backoff_pow);
                             continue;
                         }
@@ -263,6 +301,7 @@ fn main() {
                 if verbose {
                     println!("Producer thread finished after sending {local_sent} messages",);
                 }
+                done.store(true, Ordering::Relaxed);
             });
         }
 
@@ -274,6 +313,9 @@ fn main() {
             let validation_storage = Arc::clone(&validation_storage);
             let msg_check_len = args.msg_check_len;
             let latest_end = Arc::clone(&latest_consumer_end);
+            let stop = Arc::clone(&stop);
+            let barrier = Arc::clone(&barrier);
+            let done = Arc::clone(&done);
 
             s.spawn(move || {
                 let mut local_received = 0_u32;
@@ -283,7 +325,14 @@ fn main() {
                 } else {
                     Vec::new()
                 };
+                barrier.wait();
                 loop {
+                    if stop.load(Ordering::Relaxed) {
+                        panic!(
+                            "Consumer timed out after {:?} while waiting to receive",
+                            std::time::Duration::from_secs(args.timeout_secs)
+                        );
+                    }
                     if consumed_count.load(Ordering::Relaxed) >= msg_count {
                         break;
                     }
@@ -347,6 +396,7 @@ fn main() {
                     let mut guard = validation_storage.lock().unwrap();
                     guard.extend(local_validations);
                 }
+                done.store(true, Ordering::Relaxed);
             });
         }
     });
