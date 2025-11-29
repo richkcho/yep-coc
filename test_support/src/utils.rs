@@ -6,6 +6,16 @@ use yep_cache_line_size::{CacheLevel, CacheType, get_cache_line_size};
 
 static CACHE_LINE_SIZE: AtomicU16 = AtomicU16::new(0);
 
+fn ensure_cache_line_size() -> u16 {
+    if CACHE_LINE_SIZE.load(Ordering::Relaxed) == 0 {
+        CACHE_LINE_SIZE.store(
+            get_cache_line_size(CacheLevel::L1, CacheType::Data).unwrap() as u16,
+            Ordering::Relaxed,
+        );
+    }
+    CACHE_LINE_SIZE.load(Ordering::Relaxed)
+}
+
 /// Simple exponential backoff used by examples/benchmarks to avoid hammering the scheduler.
 pub fn backoff(pow: &mut u8) {
     if *pow < 6 {
@@ -17,6 +27,11 @@ pub fn backoff(pow: &mut u8) {
     } else {
         std::thread::yield_now();
     }
+}
+
+/// Return the current L1 data cache line size (cached after first lookup).
+pub fn cache_line_size() -> u16 {
+    ensure_cache_line_size()
 }
 
 pub fn str_to_u8(s: &str) -> &[u8] {
@@ -40,13 +55,6 @@ pub fn copy_str_to_slice(s: &str, buf: &mut [u8]) {
 }
 
 pub fn align_to_cache_line(size: u16) -> u16 {
-    if CACHE_LINE_SIZE.load(Ordering::Relaxed) == 0 {
-        CACHE_LINE_SIZE.store(
-            get_cache_line_size(CacheLevel::L1, CacheType::Data).unwrap() as u16,
-            Ordering::Relaxed,
-        );
-    }
-
-    let cache_line_size = CACHE_LINE_SIZE.load(Ordering::Relaxed);
+    let cache_line_size = ensure_cache_line_size();
     size.div_ceil(cache_line_size) * cache_line_size
 }
