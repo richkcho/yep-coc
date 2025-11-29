@@ -28,8 +28,9 @@
 //! - Measurement settings: use Criterion defaults unless overridden on the CLI
 //! - Throughput reported in messages/second
 
-use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::collections::HashMap;
+use std::hint::black_box;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Barrier};
 use std::thread;
