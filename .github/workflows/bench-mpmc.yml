@@ -12,6 +12,11 @@ on:
         required: false
         default: ''
         type: string
+      make_comment:
+        description: 'Whether to post benchmark results as a comment on the PR'
+        required: false
+        default: true
+        type: boolean
 
 permissions:
   contents: read
@@ -66,7 +71,7 @@ jobs:
           fi
 
       - name: Comment benchmark start on PR
-        if: steps.parse-pr.outputs.is_main_run != 'true'
+        if: steps.parse-pr.outputs.is_main_run != 'true' && inputs.make_comment == true
         id: progress-comment
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         with:
@@ -281,7 +286,7 @@ jobs:
         run: cat results.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Comment benchmark artifact on PR
-        if: success() && steps.parse-pr.outputs.is_main_run != 'true'
+        if: success() && steps.parse-pr.outputs.is_main_run != 'true' && inputs.make_comment == true
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         with:
           script: |
@@ -328,7 +333,7 @@ jobs:
             }
 
       - name: Comment benchmark failure on PR
-        if: failure() && steps.parse-pr.outputs.is_main_run != 'true'
+        if: failure() && steps.parse-pr.outputs.is_main_run != 'true' && inputs.make_comment == true
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         with:
           script: |
