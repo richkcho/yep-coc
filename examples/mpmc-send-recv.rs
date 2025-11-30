@@ -3,14 +3,14 @@
 //! Note that in general, using multiple producers and consumers on MPMC
 //! queues is not recommended due to potential performance degradation.
 
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
 use test_support::utils::{align_to_cache_line, backoff, copy_str_to_slice, str_from_u8};
 use yep_coc::{
     YCQueue, YCQueueError,
-    queue_alloc_helpers::{YCQueueOwnedData, YCQueueSharedData},
+    queue_alloc_helpers::{CursorCacheLines, YCQueueOwnedData, YCQueueSharedData},
 };
 
 const PATTERN: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -55,6 +55,30 @@ struct Args {
     /// Enable verbose logging
     #[arg(short = 'v', long, default_value_t = false)]
     verbose: bool,
+
+    /// Cursor placement strategy: split cache lines or unified
+    #[arg(
+        long,
+        value_enum,
+        default_value_t = CursorLayout::Split,
+        value_name = "LAYOUT"
+    )]
+    cursor_layout: CursorLayout,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum CursorLayout {
+    Split,
+    Unified,
+}
+
+impl From<CursorLayout> for CursorCacheLines {
+    fn from(layout: CursorLayout) -> Self {
+        match layout {
+            CursorLayout::Split => CursorCacheLines::Split,
+            CursorLayout::Unified => CursorCacheLines::Single,
+        }
+    }
 }
 
 fn warn_for_thread_counts(args: &Args) {
@@ -134,7 +158,11 @@ fn main() {
         panic!("batch_size cannot exceed queue_depth");
     }
 
-    let owned_data = YCQueueOwnedData::new(args.queue_depth, slot_size);
+    let owned_data = YCQueueOwnedData::new_with_cursor_layout(
+        args.queue_depth,
+        slot_size,
+        args.cursor_layout.into(),
+    );
 
     let mut producer_queues = Vec::with_capacity(args.producer_threads as usize);
     let mut consumer_queues = Vec::with_capacity(args.consumer_threads as usize);
