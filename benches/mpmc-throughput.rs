@@ -332,28 +332,28 @@ fn bench_mpmc(c: &mut Criterion) {
                             &params,
                             |b, params| {
                                 b.iter_custom(|iters| {
-                                    let mut total = Duration::ZERO;
-                                    let mut total_items: u64 = 0;
+                                    let duration = sample_duration
+                                        .checked_mul(
+                                            u32::try_from(iters)
+                                                .expect("iters was too large to fit in u32"),
+                                        )
+                                        .expect("sample_duration overflow");
 
-                                    for _ in 0..iters {
-                                        let (dt, items) =
-                                            run_mpmc_sample(params, sample_duration);
-                                        total += dt;
-                                        total_items += items;
-                                    }
+                                    let (time_taken, items_processed) =
+                                        run_mpmc_sample(params, duration);
 
-                                    let secs = total.as_secs_f64();
+                                    let secs = time_taken.as_secs_f64();
                                     if secs > 0.0 && is_verbose {
-                                        let throughput = total_items as f64 / secs;
+                                        let throughput = items_processed as f64 / secs;
                                         println!(
-                                            "params={:?} iters={} total_items={} total_time={:?} throughput={:.0} items/s",
-                                            params, iters, total_items, total, throughput
+                                            "params={:?} iters={} items_processed={} time_taken={:?} throughput={:.0} items/s",
+                                            params, iters, items_processed, time_taken, throughput
                                         );
                                     }
 
                                     Duration::from_nanos(
-                                        (total.as_nanos()
-                                            * total_items as u128
+                                        (time_taken.as_nanos()
+                                            * items_processed as u128
                                             / (iters as u128 * items_per_sample as u128))
                                             as u64,
                                     )
