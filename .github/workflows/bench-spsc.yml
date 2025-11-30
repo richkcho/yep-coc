@@ -224,14 +224,32 @@ jobs:
               
               # Verify we have at least 2 elements
               if (length(changes) >= 2) {
-                change_pct = changes[2]
+                change_pct_str = changes[2]
+                # Remove % sign and convert to number
+                gsub(/%/, "", change_pct_str)
+                time_change = change_pct_str + 0.0
+                
+                # Convert time change to throughput change
+                # If time decreased by X%, throughput increased by X/(1-X/100)%
+                # If time increased by X%, throughput decreased by X/(1+X/100)%
+                if (time_change < 0) {
+                  # Time decreased, throughput increased
+                  thrpt_change = (-time_change) / (1 + time_change/100)
+                  thrpt_change_str = sprintf("+%.2f%%", thrpt_change)
+                } else if (time_change > 0) {
+                  # Time increased, throughput decreased
+                  thrpt_change = (-time_change) / (1 + time_change/100)
+                  thrpt_change_str = sprintf("%.2f%%", thrpt_change)
+                } else {
+                  thrpt_change_str = "0.00%"
+                }
                 
                 # Report current throughput with percent change if available
                 if (current_thr != "" && thr_unit != "") {
-                  current_change = sprintf("%s %s (%s)", current_thr, thr_unit, change_pct)
+                  current_change = sprintf("%s %s (%s)", current_thr, thr_unit, thrpt_change_str)
                 } else {
-                  # Fallback to just percentage if we cannot parse time
-                  current_change = change_pct
+                  # Fallback to just percentage if we cannot parse throughput
+                  current_change = thrpt_change_str
                 }
               }
               
