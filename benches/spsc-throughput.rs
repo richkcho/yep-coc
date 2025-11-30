@@ -396,33 +396,27 @@ fn bench_spsc(c: &mut Criterion) {
                 let id = params.id();
                 group.bench_with_input(BenchmarkId::from_parameter(id), &params, |b, params| {
                     b.iter_custom(|iters| {
-                        let mut total = Duration::ZERO;
-                        let mut total_items: u64 = 0;
 
-                        for _ in 0..iters {
-                            let (dt, items) = run_spsc_sample(
-                                params,
-                                sample_duration,
-                                producer_core,
-                                consumer_core,
-                                touch_stride,
-                            );
-                            total += dt;
-                            total_items += items;
-                        }
+                        let (time_taken, items_processed) = run_spsc_sample(
+                            params,
+                            sample_duration * u32::try_from(iters).expect("iters was too large to fit in u32"),
+                            producer_core,
+                            consumer_core,
+                            touch_stride,
+                        );
 
                         // Print average throughput for debugging only when verbose is enabled
-                        let secs = total.as_secs_f64();
+                        let secs = time_taken.as_secs_f64();
                         if secs > 0.0 && is_verbose {
-                            let throughput = total_items as f64 / secs;
+                            let throughput = items_processed as f64 / secs;
                             println!(
-                                "params={:?} iters={} total_items={} total_time={:?} throughput={:.0} items/s",
-                                params, iters, total_items, total, throughput
+                                "params={:?} iters={} items_processed={} time_taken={:?} throughput={:.0} items/s",
+                                params, iters, items_processed, time_taken, throughput
                             );
                         }
 
                         // the duration here is per `items_per_sample`` items.
-                        Duration::from_nanos((total.as_nanos() * total_items as u128 / (iters as u128 * items_per_sample as u128)) as u64)
+                        Duration::from_nanos((time_taken.as_nanos() * items_processed as u128 / (iters as u128 * items_per_sample as u128)) as u64)
                     });
                 });
             }
