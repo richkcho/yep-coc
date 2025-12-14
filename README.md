@@ -66,34 +66,6 @@ fn main() {
 }
 ```
 
-## YCMutexQueue Example
-
-The `YCMutexQueue` provides similar blocking capabilities using standard library primitives (Mutex and CondVar) and is enabled with the `mutex` feature:
-
-```rust
-use std::time::Duration;
-use yep_coc::queue_alloc_helpers::YCMutexQueueOwnedData;
-use yep_coc::YCMutexQueue;
-
-fn main() {
-    // Allocate backing storage for 4 slots of 128 bytes each.
-    let owned = YCMutexQueueOwnedData::new(4, 128);
-    let mut queue = YCMutexQueue::from_owned_data(&owned).expect("queue");
-    
-    let timeout = Duration::from_millis(100);
-    
-    // Producer: reserve a slot, write data, then publish it.
-    let mut slot = queue.get_produce_slot(timeout).expect("produce slot");
-    slot.data[..5].copy_from_slice(b"hello");
-    queue.mark_slot_produced(slot).expect("publish");
-    
-    // Consumer: wait for and take a slot, read the data, and return it.
-    let slot = queue.get_consume_slot(timeout).expect("consume slot");
-    assert_eq!(&slot.data[..5], b"hello");
-    queue.mark_slot_consumed(slot).expect("reclaim");
-}
-```
-
 ## Benchmarks
 
 The repository includes Criterion-based benchmarks for measuring SPSC queue throughput:
