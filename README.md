@@ -15,12 +15,12 @@
 
 ## Quick Start
 ```rust
-use yep_coc::queue_alloc_helpers::YCQueueOwnedData;
+use yep_coc::queue_alloc_helpers::{CursorCacheLines, YCQueueOwnedData};
 use yep_coc::{YCQueue, YCQueueSharedMeta};
 
 fn main() {
     // Allocate backing storage for 4 slots of 128 bytes each.
-    let mut owned = YCQueueOwnedData::new(4, 128);
+    let mut owned = YCQueueOwnedData::new_with_cursor_layout(4, 128, CursorCacheLines::Split);
     let shared = YCQueueSharedMeta::new(&owned.meta);
     let mut queue = YCQueue::new(shared, owned.data.as_mut_slice()).expect("queue");
 

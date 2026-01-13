@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod single_thread_tests {
-    use yep_coc::queue_alloc_helpers::YCQueueOwnedData;
+    use yep_coc::queue_alloc_helpers::{CursorCacheLines, YCQueueOwnedData};
     use yep_coc::{YCQueue, YCQueueError, YCQueueProduceSlot, YCQueueSharedMeta};
 
     use test_support::utils::{copy_str_to_slice, str_from_u8};
@@ -17,7 +17,11 @@ mod single_thread_tests {
         /*
          * Set up the "shared metadata" for the queue
          */
-        let mut owned_data = YCQueueOwnedData::new(slot_count, slot_size);
+        let mut owned_data = YCQueueOwnedData::new_with_cursor_layout(
+            slot_count,
+            slot_size,
+            CursorCacheLines::Split,
+        );
         let shared_meta = YCQueueSharedMeta::new(&owned_data.meta);
 
         // set up the queue
@@ -121,7 +125,11 @@ mod single_thread_tests {
         /*
          * Set up the "shared metadata" for the queue
          */
-        let mut owned_data = YCQueueOwnedData::new(slot_count, slot_size);
+        let mut owned_data = YCQueueOwnedData::new_with_cursor_layout(
+            slot_count,
+            slot_size,
+            CursorCacheLines::Split,
+        );
         let shared_meta = YCQueueSharedMeta::new(&owned_data.meta);
 
         // set up the queue
@@ -196,7 +204,11 @@ mod single_thread_tests {
         let slot_size: u16 = 64;
         let batch: u16 = 4;
 
-        let mut owned_data = YCQueueOwnedData::new(slot_count, slot_size);
+        let mut owned_data = YCQueueOwnedData::new_with_cursor_layout(
+            slot_count,
+            slot_size,
+            CursorCacheLines::Split,
+        );
         let shared_meta = YCQueueSharedMeta::new(&owned_data.meta);
         let mut queue = YCQueue::new(shared_meta, owned_data.data.as_mut_slice()).unwrap();
 
@@ -237,7 +249,11 @@ mod single_thread_tests {
         /*
          * Set up the "shared metadata" for the queue
          */
-        let mut owned_data = YCQueueOwnedData::new(slot_count, slot_size);
+        let mut owned_data = YCQueueOwnedData::new_with_cursor_layout(
+            slot_count,
+            slot_size,
+            CursorCacheLines::Split,
+        );
         let shared_meta = YCQueueSharedMeta::new(&owned_data.meta);
 
         // set up the queue
@@ -274,7 +290,11 @@ mod single_thread_tests {
         /*
          * Set up the "shared metadata" for the queue
          */
-        let mut owned_data = YCQueueOwnedData::new(slot_count, slot_size);
+        let mut owned_data = YCQueueOwnedData::new_with_cursor_layout(
+            slot_count,
+            slot_size,
+            CursorCacheLines::Split,
+        );
         let shared_meta = YCQueueSharedMeta::new(&owned_data.meta);
 
         // set up the queue
@@ -320,7 +340,11 @@ mod single_thread_tests {
         const ITERATIONS: usize = 4; // Number of times to loop around the queue
 
         // Set up the queue
-        let mut owned_data = YCQueueOwnedData::new(slot_count, slot_size);
+        let mut owned_data = YCQueueOwnedData::new_with_cursor_layout(
+            slot_count,
+            slot_size,
+            CursorCacheLines::Split,
+        );
         let shared_meta = YCQueueSharedMeta::new(&owned_data.meta);
         let mut queue = YCQueue::new(shared_meta, owned_data.data.as_mut_slice()).unwrap();
 
@@ -378,7 +402,11 @@ mod single_thread_tests {
         let slot_count: u16 = 8;
         let slot_size: u16 = 64;
 
-        let mut owned_data = YCQueueOwnedData::new(slot_count, slot_size);
+        let mut owned_data = YCQueueOwnedData::new_with_cursor_layout(
+            slot_count,
+            slot_size,
+            CursorCacheLines::Split,
+        );
         let shared_meta = YCQueueSharedMeta::new(&owned_data.meta);
         let mut queue = YCQueue::new(shared_meta, owned_data.data.as_mut_slice()).unwrap();
 

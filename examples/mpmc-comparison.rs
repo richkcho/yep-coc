@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use test_support::utils::{align_to_cache_line, copy_str_to_slice, str_from_u8};
 use yep_coc::{
     YCQueue, YCQueueError,
-    queue_alloc_helpers::{YCQueueOwnedData, YCQueueSharedData},
+    queue_alloc_helpers::{CursorCacheLines, YCQueueOwnedData, YCQueueSharedData},
 };
 
 #[cfg(feature = "futex")]
@@ -59,7 +59,11 @@ fn run_ycqueue(args: &Args, slot_size: u16, default_message: &str) -> Duration {
         0
     };
 
-    let owned_data = YCQueueOwnedData::new(args.queue_depth, slot_size);
+    let owned_data = YCQueueOwnedData::new_with_cursor_layout(
+        args.queue_depth,
+        slot_size,
+        CursorCacheLines::Split,
+    );
 
     let mut producer_queues = Vec::with_capacity(args.producer_threads as usize);
     let mut consumer_queues = Vec::with_capacity(args.consumer_threads as usize);
@@ -1075,6 +1079,7 @@ fn main() {
     let flume_dur = run_flume(&args, slot_size, default_message);
     let mv_dur = run_mutex_vecdeque(&args, slot_size, default_message);
 
+    #[allow(unused_mut)]
     let mut results = vec![
         QueueResult::new("YCQueue", yc_dur, args.msg_count),
         QueueResult::new("Flume (bounded)", flume_dur, args.msg_count),
